@@ -9,7 +9,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <fstream>
-
+#include <filesystem>
 using namespace K;
 
 void Pack::encode_hex_file(const std::string &in, const std::string &out_hex) {
@@ -130,23 +130,18 @@ std::vector<uint8_t> Pack::hash(const std::string &file) {
     return out;
 }
 
+// Dans Pack.cpp
 int Pack::send_file(const std::string &file_path, const std::string &host, uint16_t port, unsigned int timeout) {
-    if (!filesystem::exists(file_path)) return INPUT_NOT_FOUND;
-
-    std::ifstream ifs(file_path, std::ios::binary | std::ios::ate);
-    if (!ifs) return SYS_ERROR;
-
-    const size_t file_size = ifs.tellg();
-    ifs.close();
-
-    const auto file_hash = hash(file_path);
-    TransferMetadata metadata{
-        file_size, file_hash,
-        static_cast<uint32_t>((file_size + NET_BUF_SIZE - 1) / NET_BUF_SIZE), 1,
-    };
+    if (!std::filesystem::exists(file_path)) {
+        ko("Input file not found: " + file_path);
+        return INPUT_NOT_FOUND;
+    }
 
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) return NETWORK_ERROR;
+    if (sock < 0) {
+        ko("Socket creation error");
+        return NETWORK_ERROR;
+    }
 
     timeval tv{};
     tv.tv_sec = timeout;
@@ -156,29 +151,62 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     if (inet_pton(AF_INET, host.c_str(), &server_addr.sin_addr) <= 0) {
+        ko("Invalid address or address not supported");
         close(sock);
         return NETWORK_ERROR;
     }
 
     if (connect(sock, reinterpret_cast<sockaddr *>(&server_addr), sizeof(server_addr)) < 0) {
+        ko("Connection Failed");
         close(sock);
         return NETWORK_ERROR;
     }
 
-    for (size_t offset = 0; offset < file_size; offset += NET_BUF_SIZE) {
-        auto chunk = prepare_file_chunk(file_path, offset, NET_BUF_SIZE);
-        if (send(sock, chunk.data(), chunk.size(), 0) < 0) {
+    // Étape 1 : Envoyer le nom du fichier original
+    std::string base_filename = std::filesystem::path(file_path).filename().string();
+    if (send(sock, base_filename.c_str(), base_filename.length() + 1, 0) < 0) {
+        ko("Failed to send filename");
+        close(sock);
+        return NETWORK_ERROR;
+    }
+
+    // Étape 2 : Envoyer le contenu du fichier
+    std::ifstream ifs(file_path, std::ios::binary);
+    if (!ifs) {
+        ko("Failed to open file for reading: " + file_path);
+        close(sock);
+        return SYS_ERROR;
+    }
+
+    std::vector<char> buffer(NET_BUF_SIZE);
+    while (ifs.read(buffer.data(), buffer.size())) {
+        if (send(sock, buffer.data(), ifs.gcount(), 0) < 0) {
+            ko("Failed to send file content");
             close(sock);
             return NETWORK_ERROR;
         }
     }
+    // Gérer le dernier morceau si le fichier n'est pas un multiple de la taille du buffer
+    if (ifs.gcount() > 0) {
+        if (send(sock, buffer.data(), ifs.gcount(), 0) < 0) {
+            ko("Failed to send final file content chunk");
+            close(sock);
+            return NETWORK_ERROR;
+        }
+    }
+
+    ok("File sent successfully.");
     close(sock);
     return OK;
 }
 
-int Pack::receive_file(const std::string &output_path_base, uint16_t port, unsigned int timeout) {
+// Dans Pack.cpp
+int Pack::receive_file(uint16_t port,unsigned int timeout) {
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) return NETWORK_ERROR;
+    if (server_fd < 0) {
+        ko("Socket creation error");
+        return NETWORK_ERROR;
+    }
 
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -189,11 +217,13 @@ int Pack::receive_file(const std::string &output_path_base, uint16_t port, unsig
     address.sin_port = htons(port);
 
     if (bind(server_fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0) {
+        ko("Bind failed");
         close(server_fd);
         return NETWORK_ERROR;
     }
 
     if (listen(server_fd, 10) < 0) {
+        ko("Listen failed");
         close(server_fd);
         return NETWORK_ERROR;
     }
@@ -209,7 +239,6 @@ int Pack::receive_file(const std::string &output_path_base, uint16_t port, unsig
             ko("Accept failed, continuing to listen...");
             continue;
         }
-
         timeval tv{};
         tv.tv_sec = timeout;
         setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -218,38 +247,52 @@ int Pack::receive_file(const std::string &output_path_base, uint16_t port, unsig
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
         ok("Accepted connection from " + std::string(client_ip));
 
-        std::ofstream ofs(output_path_base, std::ios::binary | std::ios::trunc);
-        if (!ofs) {
-            ko("Could not open file for writing: " + output_path_base);
+        char c;
+        std::string original_filename;
+        while (recv(client_sock, &c, 1, 0) > 0 && c != '\0') {
+            original_filename += c;
+        }
+
+        if (original_filename.empty()) {
+            ko("Client from " + std::string(client_ip) + " did not send a filename. Closing connection.");
             close(client_sock);
             continue;
         }
 
-        ok("Receiving file to " + output_path_base);
+        std::filesystem::path p(original_filename);
+        std::string stem = p.stem().string();
+        std::string ext = p.extension().string();
+
+        auto now = std::chrono::system_clock::now();
+        auto in_time_t = std::chrono::system_clock::to_time_t(now);
+        std::stringstream ss_date;
+        ss_date << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d");
+
+        std::string final_filename = stem + "_" + ss_date.str() + ext;
+
+        std::ofstream ofs(final_filename, std::ios::binary | std::ios::trunc);
+        if (!ofs) {
+            ko("Could not open file for writing: " + final_filename);
+            close(client_sock);
+            continue;
+        }
+
+        ok("Receiving file to " + final_filename);
         std::vector<uint8_t> buffer(NET_BUF_SIZE);
         size_t total_received = 0;
+        ssize_t bytes_received;
 
-        while (true) {
-            const ssize_t bytes_received = recv(client_sock, buffer.data(), buffer.size(), 0);
-            if (bytes_received < 0) {
-                ko("Error receiving data (timeout or other error).");
-                break;
-            }
-            if (bytes_received == 0) {
-                ok("Client closed the connection.");
-                break;
-            }
-
+        while ((bytes_received = recv(client_sock, buffer.data(), buffer.size(), 0)) > 0) {
             ofs.write(reinterpret_cast<char *>(buffer.data()), bytes_received);
             total_received += bytes_received;
         }
-
         ofs.close();
         close(client_sock);
         ok("Finished with client " + std::string(client_ip) + ". Received " + std::to_string(total_received) +
-           " bytes.");
+           " bytes into " + final_filename);
         ok("Waiting for new connection...");
     }
+
     close(server_fd);
     return OK;
 }

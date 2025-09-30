@@ -111,13 +111,11 @@ namespace K {
 
         /**
          * @brief Receives a file over network
-         * @param output_path Path to save a received file
          * @param port Port to listen on
          * @param timeout Reception timeout in seconds
          * @return Status code
          */
-        static int receive_file(const std::string &output_path, uint16_t port,
-                                unsigned int timeout = DEFAULT_TIMEOUT);
+        static int receive_file(uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
          * @brief Verifies file transfer integrity

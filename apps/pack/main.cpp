@@ -128,7 +128,7 @@ int main(const int argc, const char **argv) {
             ss << "recv_" << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S") << ".dat";
             std::string output_filename = ss.str();
             Pack::ok(output_filename);
-            Pack::receive_file(output_filename, port, Pack::DEFAULT_TIMEOUT);
+            Pack::receive_file(port, Pack::DEFAULT_TIMEOUT);
             return Pack::OK;
         }
 
