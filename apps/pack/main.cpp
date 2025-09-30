@@ -87,15 +87,15 @@ int main(const int argc, const char **argv) {
                 Pack::ko("send: require <file> <destination>");
                 return Pack::INPUT_NOT_FOUND;
             }
-            Pack::send_file(argv[2], argv[3], Pack::DEFAULT_TIMEOUT);
+            Pack::send_file(argv[1], argv[2], atoi(argv[3]));
             return Pack::OK;
         }
         if (cmd == "recv") {
             int port = 8080;
 
-            if (argc > 2) {
+            if (argc > 3) {
                 try {
-                    port = std::stoi(argv[2]);
+                    port = std::stoi(argv[3]);
                 } catch (const std::invalid_argument &e) {
                     Pack::ko(e.what());
                     return Pack::USAGE_ERROR;
