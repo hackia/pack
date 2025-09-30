@@ -7,6 +7,14 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(BLAKE3 REQUIRED libblake3)
 
 include(FetchContent)
+
+FetchContent_Declare(
+        blake3
+        GIT_REPOSITORY https://github.com/BLAKE3-team/BLAKE3.git
+        GIT_TAG master
+        SOURCE_SUBDIR c
+)
+FetchContent_MakeAvailable(blake3)
 FetchContent_Declare(
         googletest
         URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
