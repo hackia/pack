@@ -1,4 +1,6 @@
-# pack
+# Pack
+
+
 
 [![test](https://github.com/hackia/pack/actions/workflows/test.yml/badge.svg)](https://github.com/hackia/pack/actions/workflows/test.yml)
 
@@ -27,4 +29,34 @@ pack recv 8080
 
 ```shell
 pack send . 192.168.1.6:8080
+```
+
+## Systemd 
+
+```unit file (systemd)
+[Unit]
+Description=Pack Receive Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Pack
+ExecStart=/usr/local/bin/pack recv 8080
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+```
+
+## Systemd Service Installation
+
+To install the systemd service, copy the unit file to `~/.local/share/systemd/user/pack-receive.service` and run:
+
+```shell
+mkdir -p ~/.local/share/systemd/user
+install -m 644 pack-receive.service ~/.local/share/systemd/user/pack-receive.service
+systemctl --user daemon-reload
+systemctl --user enable pack-receive.service
+systemctl --user start pack-receive.service
 ```
