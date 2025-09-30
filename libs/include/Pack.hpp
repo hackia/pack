@@ -4,7 +4,6 @@
 #include <string>
 #include <iomanip>
 
-
 extern "C" {
 #include <blake3.h>
 }
@@ -12,42 +11,156 @@ extern "C" {
 using namespace std;
 
 namespace K {
+    /** Hexadecimal character map for encoding */
     static constexpr char HEXMAP[] = "0123456789abcdef";
 
+    /**
+     * @brief Class handling file operations, encoding/decoding, and network transfers
+     */
     class Pack {
     public:
-        static constexpr size_t BUF_SIZE = 64 * 1024; // 64 KiB
-        static constexpr size_t DIGEST_SIZE = 32; // BLAKE3 default 32 bytes
-        static constexpr int HASH_EQUALS = 0;
-        static constexpr int HASH_UNEQUALS = 1;
-        static constexpr int INPUT_NOT_FOUND = 2;
-        static constexpr int SYS_ERROR = 3;
-        static constexpr int MISMATCH = 4;
-        static constexpr int USAGE_ERROR = 5;
-        static constexpr int OK = 0;
+        // Buffer and status constants
+        static constexpr size_t BUF_SIZE = 64 * 1024; ///< Buffer size for file operations (64 KiB)
+        static constexpr size_t DIGEST_SIZE = 32; ///< BLAKE3 hash digest size in bytes
+        static constexpr int HASH_EQUALS = 0; ///< Hash comparison result: equal
+        static constexpr int HASH_UNEQUALS = 1; ///< Hash comparison result: not equal
+        static constexpr int INPUT_NOT_FOUND = 2; ///< Error: input file not found
+        static constexpr int SYS_ERROR = 3; ///< Error: system error occurred
+        static constexpr int MISMATCH = 4; ///< Error: data mismatch
+        static constexpr int USAGE_ERROR = 5; ///< Error: incorrect usage
+        static constexpr int OK = 0; ///< Operation successful
 
-        static bool compare(const std::string &a, const std::string &b);
+        // Network-related constants
+        static constexpr size_t NET_BUF_SIZE = 16 * 1024; ///< Network buffer size (16 KiB)
+        static constexpr int NETWORK_ERROR = 6; ///< Error: network operation failed
+        static constexpr int TIMEOUT_ERROR = 7; ///< Error: operation timed out
+        static constexpr unsigned int DEFAULT_TIMEOUT = 30; ///< Default network timeout in seconds
 
-        static uint8_t from_hex_nibble(char c);
-
+        /**
+         * @brief Encodes a binary file to hexadecimal format
+         * @param in Input binary file path
+         * @param out_hex Output hexadecimal file path
+         */
         static void encode_hex_file(const std::string &in, const std::string &out_hex);
 
+        /**
+         * @brief Converts binary data to hexadecimal string
+         * @param data Pointer to binary data
+         * @param len Length of data in bytes
+         * @return Hexadecimal string representation
+         */
         static std::string to_hex(const uint8_t *data, size_t len);
 
+        /**
+         * @brief Checks if a file exists
+         * @param file Path to file
+         * @return true if a file exists, false otherwise
+         */
         static bool exists(const std::string &file);
 
+        /**
+         * @brief Copies a file from source to destination
+         * @param dest Destination path
+         * @param source Source path
+         */
         static void copy(const std::string &dest, const std::string &source);
 
+        /**
+         * @brief Converts a hex character to its 4-bit value
+         * @param c Hex character
+         * @return 4-bit value
+         */
+        static uint8_t from_hex_nibble(char c);
+
+        /**
+         * @brief Prints error message
+         * @param message Error message to display
+         */
         static void ko(const std::string &message);
 
+        /**
+         * @brief Decodes a hexadecimal file to binary
+         * @param in_hex Input hex file path
+         * @param out_bin Output binary file path
+         */
         static void decode_hex_file(const std::string &in_hex, const std::string &out_bin);
 
+        /**
+         * @brief Prints success message
+         * @param message Success message to display
+         */
         static void ok(const std::string &message);
 
+        /**
+         * @brief Computes BLAKE3 hash of a file
+         * @param file Path to file
+         * @return Vector containing a hash value
+         */
         static std::vector<uint8_t> hash(const std::string &file);
 
+        /**
+         * @brief Sends a file over network
+         * @param file_path Path to file to send
+         * @param host Destination host
+         * @param port Destination port
+         * @param timeout Connection timeout in seconds
+         * @return Status code
+         */
+        static int send_file(const std::string &file_path, const std::string &host,
+                             uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
+
+        /**
+         * @brief Receives a file over network
+         * @param output_path Path to save received file
+         * @param port Port to listen on
+         * @param timeout Reception timeout in seconds
+         * @return Status code
+         */
+        static int receive_file(const std::string &output_path, uint16_t port,
+                                unsigned int timeout = DEFAULT_TIMEOUT);
+
+        /**
+         * @brief Verifies file transfer integrity
+         * @param original_hash Hash of an original file
+         * @param received_file Path to a received file
+         * @return true if verification successful, false otherwise
+         */
+        static bool verify_transfer(const std::vector<uint8_t> &original_hash,
+                                    const std::string &received_file);
+
+    protected:
+        /**
+         * @brief Prepares a chunk of file for network transfer
+         * @param file_path Path to source file
+         * @param offset Offset in file
+         * @param chunk_size Size of chunk to prepare
+         * @return Vector containing chunk data
+         */
+        static std::vector<uint8_t> prepare_file_chunk(const std::string &file_path,
+                                                       size_t offset, size_t chunk_size);
+
+        /**
+         * @brief Writes a chunk of received data to a file
+         * @param file_path Path to a destination file
+         * @param chunk Chunk data to write
+         * @param offset Offset in the file to write at
+         * @return true if write successful, false otherwise
+         */
+        static bool write_chunk(const std::string &file_path, const std::vector<uint8_t> &chunk,
+                                size_t offset);
+
     private:
-        static string input;
-        static string output;
+        static std::string input; ///< Input file path
+        static std::string output; ///< Output file path
+
+        /**
+         * @brief Structure for network transfer metadata
+         */
+        struct TransferMetadata {
+            size_t file_size; ///< Size of file being transferred
+            std::vector<uint8_t> file_hash; ///< Hash of file for verification
+            uint32_t chunk_count; ///< Number of chunks in transfer
+            uint16_t protocol_version; ///< Protocol version number
+        };
     };
 }
