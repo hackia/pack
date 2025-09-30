@@ -52,10 +52,10 @@ int main(const int argc, const char **argv) {
             const std::string hx_in = Pack::to_hex(h_in.data(), h_in.size());
             const std::string hx_dec = Pack::to_hex(h_dec.data(), h_dec.size());
             if (h_in == h_dec) {
-                Pack::ok(hx_in + " == " + hx_dec);
+                Pack::ok("hashes match");
                 return Pack::OK;
             }
-            Pack::ko("Hash(input)  != Hash(decoded)");
+            Pack::ko("Hashes do not match");
             return Pack::MISMATCH;
         }
     } catch (std::system_error &e) {
