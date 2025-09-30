@@ -1,8 +1,9 @@
 #include "../libs/include/Pack.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
-
+#include <filesystem>
 using namespace K;
+using namespace std;
 
 class PackTest : public ::testing::Test {
 protected:

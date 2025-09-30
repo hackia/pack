@@ -1,47 +1,68 @@
 #include "libs/include/Pack.hpp"
 
+extern "C" {
+#include <blake3.h>
+}
+
 using namespace K;
+using namespace std;
 
 int main(const int argc, const char **argv) {
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <input> <output>\n";
-        return 2;
+    if (argc < 2) {
+        std::cerr << "Usage:\n"
+                << "  " << argv[0] << " encode <input> <output.hex>\n"
+                << "  " << argv[0] << " decode <input.hex> <output>\n"
+                << "  " << argv[0] << " verify <input> <output.hex>\n";
+        return Pack::USAGE_ERROR;
     }
-    const std::string input = argv[1];
-    const std::string output = argv[2];
 
+    const std::string cmd = argv[1];
     try {
-        if (!Pack::exists(input)) {
-            Pack::ko("Input file not found: " + input);
-            return Pack::INPUT_NOT_FOUND;
+        if (cmd == "encode") {
+            if (argc != 4) {
+                Pack::ko("encode: require <input> <output.hex>");
+                return Pack::INPUT_NOT_FOUND;
+            }
+            Pack::encode_hex_file(argv[2], argv[3]);
+            Pack::ok("encoded to hex " + string(argv[3]));
+            return Pack::OK;
         }
-        Pack::ok("Input file found: " + input);
-        Pack::ok("Output file: " + output);
-        Pack::ok("Starting process");
-        Pack::ok("Calculating hash of input file");
-        const auto h_input = Pack::hash(input);
-        const std::string hex_input = Pack::to_hex(h_input.data(), h_input.size());
-        Pack::ok(hex_input);
-        Pack::ok("Copying input file to output file");
-        Pack::copy(output, input);
-        if (Pack::exists(output)) {
-            Pack::ok("Output file created");
-            Pack::ok("Copying done");
-            Pack::ok("Calculating hash of output file");
-            const auto h_output = Pack::hash(output);
-            const std::string hex_output = Pack::to_hex(h_output.data(), h_output.size());
-            Pack::ok(hex_output);
-            const bool equals = h_input == h_output;
-            const std::string equals_str = equals ? "true" : "false";
-            Pack::ok("hash equals: " + equals_str);
-            Pack::ok("Process done");
-            return equals ? Pack::HASH_EQUALS : Pack::HASH_UNEQUALS;
+        if (cmd == "decode") {
+            if (argc != 4) {
+                Pack::ko("decode: require <input.hex> <output>");
+                return Pack::INPUT_NOT_FOUND;
+            }
+            Pack::decode_hex_file(argv[2], argv[3]);
+            Pack::ok("decoded to binary " + string(argv[3]));
+            return Pack::OK;
         }
-    } catch (const std::system_error &e) {
+        if (cmd == "verify") {
+            if (argc != 4) {
+                Pack::ko("verify: require <input> <output.hex>");
+                return Pack::INPUT_NOT_FOUND;
+            }
+            const std::string input = argv[2];
+            const std::string out_hex = argv[3];
+            const std::string decoded = out_hex + ".dec";
+            Pack::ok("Verifying...");
+            Pack::encode_hex_file(input, out_hex);
+            Pack::decode_hex_file(out_hex, decoded);
+            const auto h_in = Pack::hash(input);
+            const auto h_dec = Pack::hash(decoded);
+            const std::string hx_in = Pack::to_hex(h_in.data(), h_in.size());
+            const std::string hx_dec = Pack::to_hex(h_dec.data(), h_dec.size());
+            if (h_in == h_dec) {
+                Pack::ok(hx_in + " == " + hx_dec);
+                return Pack::OK;
+            }
+            Pack::ko("Hash(input)  != Hash(decoded)");
+            return Pack::MISMATCH;
+        }
+    } catch (std::system_error &e) {
         Pack::ko(e.what());
         return Pack::SYS_ERROR;
-    } catch (const std::exception &e) {
+    } catch (std::exception &e) {
         Pack::ko(e.what());
-        return Pack::MISMATCH;
+        return Pack::USAGE_ERROR;
     }
 }
