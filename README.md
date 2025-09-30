@@ -8,3 +8,9 @@ pack encode rand.bin /tmp/input.hex
 pack decode /tmp/input.hex output.bin
 pack verify rand.bin /tmp/input.hex
 ```
+
+## Usage
+```shell
+pack -h
+pack send "README.md" "hackia.ji"
+```
