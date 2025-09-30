@@ -1,5 +1,6 @@
 #include "../../libs/include/Pack.hpp"
 #include <chrono>   // NOUVEAU
+#include <cstring>
 #include <sstream>  // NOUVEAU
 #include <iomanip>  // NOUVEAU
 #include <ctime>    // NOUVEAU
@@ -14,7 +15,7 @@ void print_help(const char *program) {
             << "  " << program << " decode <input.hex> <output>         # Decode hex file to binary\n"
             << "  " << program << " verify <input> <output.hex>         # Verify encode/decode integrity\n"
             << "  " << program << " send <file> <destination>           # Send file to destination\n"
-            << "  " << program << " recv <file> [port]                  # Receive file on port (default: 8080)\n"
+            << "  " << program << " recv <port>                         # Receive file on port (default: 8080)\n"
             << "  " << program << " list                                # List available files\n"
             << "  " << program << " delete <file> <host> <port>         # Delete file from host\n"
             << "  " << program << " help                                # Show this help\n"
@@ -82,7 +83,6 @@ int main(const int argc, const char **argv) {
             return Pack::MISMATCH;
         }
 
-        // Le code CORRIGÉ à mettre dans main.cpp
         if (cmd == "send") {
             if (argc != 4) {
                 Pack::ko("send: require <file> <destination:port>");
@@ -102,7 +102,7 @@ int main(const int argc, const char **argv) {
             uint16_t port = 0;
             try {
                 port = std::stoi(destination.substr(colon_pos + 1));
-            } catch (const std::exception& e) {
+            } catch (const std::exception &e) {
                 Pack::ko(e.what());
                 return Pack::USAGE_ERROR;
             }
@@ -111,25 +111,20 @@ int main(const int argc, const char **argv) {
             return Pack::send_file(file_path, host, port, Pack::DEFAULT_TIMEOUT);
         }
         if (cmd == "recv") {
-            int port = 8080;
-
-            if (argc > 3) {
-                try {
-                    port = std::stoi(argv[3]);
-                } catch (const std::invalid_argument &e) {
-                    Pack::ko(e.what());
-                    return Pack::USAGE_ERROR;
-                }
+            try {
+                int port = stoi(argv[2]);
+                auto now = std::chrono::system_clock::now();
+                auto in_time_t = std::chrono::system_clock::to_time_t(now);
+                std::stringstream ss;
+                ss << "recv_" << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S") << ".dat";
+                std::string output_filename = ss.str();
+                Pack::ok(output_filename);
+                Pack::receive_file(port, Pack::DEFAULT_TIMEOUT);
+                return Pack::OK;
+            } catch (const std::invalid_argument &e) {
+                Pack::ko(e.what());
+                return Pack::USAGE_ERROR;
             }
-
-            auto now = std::chrono::system_clock::now();
-            auto in_time_t = std::chrono::system_clock::to_time_t(now);
-            std::stringstream ss;
-            ss << "recv_" << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S") << ".dat";
-            std::string output_filename = ss.str();
-            Pack::ok(output_filename);
-            Pack::receive_file(port, Pack::DEFAULT_TIMEOUT);
-            return Pack::OK;
         }
 
         if (cmd == "list") {
