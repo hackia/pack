@@ -87,8 +87,7 @@ int main(const int argc, const char **argv) {
                 Pack::ko("send: require <file> <destination>");
                 return Pack::INPUT_NOT_FOUND;
             }
-            Pack::send_file(argv[1], argv[2], atoi(argv[3]));
-            return Pack::OK;
+            return Pack::send_file(argv[1], argv[2], atoi(argv[3]));
         }
         if (cmd == "recv") {
             int port = 8080;
