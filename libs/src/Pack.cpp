@@ -37,13 +37,6 @@ void Pack::encode_hex_file(const std::string &in, const std::string &out_hex) {
     if (!ofs) throw std::system_error(errno, std::generic_category(), "write failed: " + out_hex);
 }
 
-uint8_t Pack::from_hex_nibble(const char c) {
-    if ('0' <= c && c <= '9') return static_cast<uint8_t>(c - '0');
-    if ('a' <= c && c <= 'f') return static_cast<uint8_t>(10 + (c - 'a'));
-    if ('A' <= c && c <= 'F') return static_cast<uint8_t>(10 + (c - 'A'));
-    throw std::runtime_error(std::string("Invalid hex nibble: '") + c + "'");
-}
-
 std::string Pack::to_hex(const uint8_t *data, const size_t len) {
     std::ostringstream oss;
     oss << std::hex << std::setfill('0');
@@ -70,6 +63,13 @@ void Pack::copy(const std::string &dest, const std::string &source) {
     }
     ofs.flush();
     if (!ofs) throw std::system_error(errno, std::generic_category(), "write failed: " + dest);
+}
+
+uint8_t Pack::from_hex_nibble(const char c) {
+    if ('0' <= c && c <= '9') return static_cast<uint8_t>(c - '0');
+    if ('a' <= c && c <= 'f') return static_cast<uint8_t>(10 + (c - 'a'));
+    if ('A' <= c && c <= 'F') return static_cast<uint8_t>(10 + (c - 'A'));
+    throw std::runtime_error(std::string("Invalid hex nibble: '") + c + "'");
 }
 
 void Pack::ko(const std::string &message) {
@@ -107,6 +107,10 @@ void Pack::decode_hex_file(const std::string &in_hex, const std::string &out_bin
 }
 
 
+void Pack::ok(const std::string &message) {
+    std::cout << "\033[1;32m* \033[1;37m" << message << "\033[0m" << std::endl;
+}
+
 std::vector<uint8_t> Pack::hash(const std::string &file) {
     std::vector<uint8_t> out(DIGEST_SIZE);
     std::ifstream ifs(file, std::ios::binary);
@@ -124,30 +128,6 @@ std::vector<uint8_t> Pack::hash(const std::string &file) {
     }
     blake3_hasher_finalize(&hasher, out.data(), out.size());
     return out;
-}
-
-void Pack::ok(const std::string &message) {
-    std::cout << "\033[1;32m* \033[1;37m" << message << "\033[0m" << std::endl;
-}
-
-std::vector<uint8_t> Pack::prepare_file_chunk(const std::string &file_path, size_t offset, size_t chunk_size) {
-    std::ifstream ifs(file_path, std::ios::binary);
-    if (!ifs) throw std::system_error(errno, std::generic_category(), "Failed to open file: " + file_path);
-
-    ifs.seekg(offset);
-    std::vector<uint8_t> chunk(chunk_size);
-    ifs.read(reinterpret_cast<char *>(chunk.data()), chunk_size);
-    chunk.resize(ifs.gcount());
-    return chunk;
-}
-
-bool Pack::write_chunk(const std::string &file_path, const std::vector<uint8_t> &chunk, size_t offset) {
-    std::ofstream ofs(file_path, std::ios::binary | std::ios::in | std::ios::out);
-    if (!ofs) return false;
-
-    ofs.seekp(offset);
-    ofs.write(reinterpret_cast<const char *>(chunk.data()), chunk.size());
-    return ofs.good();
 }
 
 int Pack::send_file(const std::string &file_path, const std::string &host, uint16_t port, unsigned int timeout) {
@@ -196,13 +176,9 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
     return OK;
 }
 
-int Pack::receive_file(const std::string &output_path, uint16_t port, unsigned int timeout) {
+int Pack::receive_file(const std::string &output_path_base, uint16_t port, unsigned int timeout) {
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) return NETWORK_ERROR;
-
-    timeval tv{};
-    tv.tv_sec = timeout;
-    setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -217,64 +193,66 @@ int Pack::receive_file(const std::string &output_path, uint16_t port, unsigned i
         return NETWORK_ERROR;
     }
 
-    if (listen(server_fd, 1) < 0) {
+    if (listen(server_fd, 10) < 0) {
         close(server_fd);
         return NETWORK_ERROR;
     }
 
-    ok("Listening on port " + std::to_string(port));
-    sockaddr_in client_addr{};
-    socklen_t client_len = sizeof(client_addr);
-    const int client_sock = accept(server_fd, reinterpret_cast<sockaddr *>(&client_addr), &client_len);
-
-    if (client_sock < 0) {
-        close(server_fd);
-        return NETWORK_ERROR;
-    }
-
-    char client_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-    ok("Accepted connection from " + std::string(client_ip));
-
-    std::vector<uint8_t> buffer(NET_BUF_SIZE);
-    size_t total_received = 0;
-
-    std::ofstream ofs(output_path, std::ios::binary | std::ios::trunc);
-    if (!ofs) {
-        close(client_sock);
-        close(server_fd);
-        return SYS_ERROR;
-    }
-
-    ok("Receiving file to " + output_path);
+    ok("Server listening continuously on port " + std::to_string(port));
 
     while (true) {
-        const ssize_t bytes_received = recv(client_sock, buffer.data(), buffer.size(), 0);
-        if (bytes_received < 0) {
-            ko("Error receiving data");
-            close(client_sock);
-            close(server_fd);
-            return NETWORK_ERROR;
+        sockaddr_in client_addr{};
+        socklen_t client_len = sizeof(client_addr);
+        const int client_sock = accept(server_fd, reinterpret_cast<sockaddr *>(&client_addr), &client_len);
+
+        if (client_sock < 0) {
+            ko("Accept failed, continuing to listen...");
+            continue;
         }
-        if (bytes_received == 0) break;
 
-        ofs.write(reinterpret_cast<char *>(buffer.data()), bytes_received);
-        total_received += bytes_received;
-        ok("Received " + std::to_string(total_received) + " bytes");
+        timeval tv{};
+        tv.tv_sec = timeout;
+        setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+        ok("Accepted connection from " + std::string(client_ip));
+
+        std::ofstream ofs(output_path_base, std::ios::binary | std::ios::trunc);
+        if (!ofs) {
+            ko("Could not open file for writing: " + output_path_base);
+            close(client_sock);
+            continue;
+        }
+
+        ok("Receiving file to " + output_path_base);
+        std::vector<uint8_t> buffer(NET_BUF_SIZE);
+        size_t total_received = 0;
+
+        while (true) {
+            const ssize_t bytes_received = recv(client_sock, buffer.data(), buffer.size(), 0);
+            if (bytes_received < 0) {
+                ko("Error receiving data (timeout or other error).");
+                break;
+            }
+            if (bytes_received == 0) {
+                ok("Client closed the connection.");
+                break;
+            }
+
+            ofs.write(reinterpret_cast<char *>(buffer.data()), bytes_received);
+            total_received += bytes_received;
+        }
+
+        ofs.close();
+        close(client_sock);
+        ok("Finished with client " + std::string(client_ip) + ". Received " + std::to_string(total_received) +
+           " bytes.");
+        ok("Waiting for new connection...");
     }
-
-    close(client_sock);
     close(server_fd);
-
-    if (!ofs.good()) {
-        ko("Error writing to file");
-        return SYS_ERROR;
-    }
-
-    ok("File received successfully");
     return OK;
 }
-
 
 bool Pack::verify_transfer(const std::vector<uint8_t> &original_hash, const std::string &received_file) {
     if (!filesystem::exists(received_file)) return false;
@@ -317,4 +295,25 @@ int Pack::delete_file(const char *file_path, const char *host, const uint16_t po
     response[bytes_received] = '\0';
 
     return strncmp(response, "OK", 2) == 0 ? OK : SYS_ERROR;
+}
+
+
+std::vector<uint8_t> Pack::prepare_file_chunk(const std::string &file_path, size_t offset, size_t chunk_size) {
+    std::ifstream ifs(file_path, std::ios::binary);
+    if (!ifs) throw std::system_error(errno, std::generic_category(), "Failed to open file: " + file_path);
+
+    ifs.seekg(offset);
+    std::vector<uint8_t> chunk(chunk_size);
+    ifs.read(reinterpret_cast<char *>(chunk.data()), chunk_size);
+    chunk.resize(ifs.gcount());
+    return chunk;
+}
+
+bool Pack::write_chunk(const std::string &file_path, const std::vector<uint8_t> &chunk, size_t offset) {
+    std::ofstream ofs(file_path, std::ios::binary | std::ios::in | std::ios::out);
+    if (!ofs) return false;
+
+    ofs.seekp(offset);
+    ofs.write(reinterpret_cast<const char *>(chunk.data()), chunk.size());
+    return ofs.good();
 }

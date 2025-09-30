@@ -82,12 +82,33 @@ int main(const int argc, const char **argv) {
             return Pack::MISMATCH;
         }
 
+        // Le code CORRIGÉ à mettre dans main.cpp
         if (cmd == "send") {
             if (argc != 4) {
-                Pack::ko("send: require <file> <destination>");
+                Pack::ko("send: require <file> <destination:port>");
                 return Pack::INPUT_NOT_FOUND;
             }
-            return Pack::send_file(argv[1], argv[2], atoi(argv[3]));
+
+            std::string file_path = argv[2];
+            std::string destination = argv[3];
+
+            size_t colon_pos = destination.find(':');
+            if (colon_pos == std::string::npos) {
+                Pack::ko("Invalid destination format. Use <host>:<port>");
+                return Pack::USAGE_ERROR;
+            }
+
+            std::string host = destination.substr(0, colon_pos);
+            uint16_t port = 0;
+            try {
+                port = std::stoi(destination.substr(colon_pos + 1));
+            } catch (const std::exception& e) {
+                Pack::ko(e.what());
+                return Pack::USAGE_ERROR;
+            }
+
+            Pack::ok("Sending " + file_path + " to " + host + ":" + std::to_string(port));
+            return Pack::send_file(file_path, host, port, Pack::DEFAULT_TIMEOUT);
         }
         if (cmd == "recv") {
             int port = 8080;
