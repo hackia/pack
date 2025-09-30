@@ -200,6 +200,53 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
     return OK;
 }
 
+int Pack::send_directory(const std::string &file_path, const std::string &host, uint16_t port, unsigned int timeout) {
+    if (!std::filesystem::exists(file_path)) {
+        ko("Directory not found: " + file_path);
+        return INPUT_NOT_FOUND;
+    }
+
+    if (!std::filesystem::is_directory(file_path)) {
+        ko("Not a directory: " + file_path);
+        return INPUT_NOT_FOUND;
+    }
+
+    std::vector<std::string> ignore_patterns;
+    if (const std::string ignore_file = file_path + "/.packignore"; std::filesystem::exists(ignore_file)) {
+        std::ifstream ifs(ignore_file);
+        std::string line;
+        while (std::getline(ifs, line)) {
+            if (!line.empty() && line[0] != '#') {
+                ignore_patterns.push_back(line);
+            }
+        }
+    }
+
+    auto should_ignore = [&ignore_patterns](const std::string &path) {
+        for (const auto &pattern: ignore_patterns) {
+            if (path.find(pattern) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    int result = OK;
+    for (const auto &entry: std::filesystem::recursive_directory_iterator(file_path)) {
+        if (entry.is_regular_file()) {
+            std::string relative_path = std::filesystem::relative(entry.path(), file_path).string();
+            if (!should_ignore(relative_path)) {
+                ok("Sending file: " + relative_path);
+                if (const int send_result = send_file(entry.path().string(), host, port, timeout); send_result != OK) {
+                    ko("Failed to send: " + relative_path);
+                    result = send_result;
+                }
+            }
+        }
+    }
+    return result;
+}
+
 // Dans Pack.cpp
 int Pack::receive_file(uint16_t port,unsigned int timeout) {
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);

@@ -4,6 +4,7 @@
 #include <sstream>  // NOUVEAU
 #include <iomanip>  // NOUVEAU
 #include <ctime>    // NOUVEAU
+#include <filesystem>
 using namespace K;
 using namespace std;
 
@@ -92,6 +93,22 @@ int main(const int argc, const char **argv) {
             std::string file_path = argv[2];
             std::string destination = argv[3];
 
+            if (filesystem::is_directory(file_path)) {
+                size_t colon_pos = destination.find(':');
+                if (colon_pos == std::string::npos) {
+                    Pack::ko("Invalid destination format. Use <host>:<port>");
+                    return Pack::USAGE_ERROR;
+                }
+                std::string host = destination.substr(0, colon_pos);
+                uint16_t port = 0;
+                try {
+                    port = std::stoi(destination.substr(colon_pos + 1));
+                } catch (const std::exception &e) {
+                    Pack::ko(e.what());
+                    return Pack::USAGE_ERROR;
+                }
+                return Pack::send_directory(file_path, host, port, Pack::DEFAULT_TIMEOUT);
+            }
             size_t colon_pos = destination.find(':');
             if (colon_pos == std::string::npos) {
                 Pack::ko("Invalid destination format. Use <host>:<port>");

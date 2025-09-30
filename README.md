@@ -10,7 +10,21 @@ pack verify rand.bin /tmp/input.hex
 ```
 
 ## Usage
+
+### Send a file
+
 ```shell
-pack -h
-pack send "README.md" "hackia.ji"
+pack send README.md 192.168.1.6:8080
+```
+
+### Receive a file
+
+```shell
+pack recv 8080
+```
+
+### Send a directory
+
+```shell
+pack send . 192.168.1.6:8080
 ```

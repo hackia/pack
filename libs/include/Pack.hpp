@@ -110,6 +110,17 @@ namespace K {
                              uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
+        * @brief Sends a file over network
+        * @param file_path Path to file to send
+        * @param host Destination host
+        * @param port Destination port
+        * @param timeout Connection timeout in seconds
+        * @return Status code
+        */
+        static int send_directory(const std::string &file_path, const std::string &host,
+                             uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
+
+        /**
          * @brief Receives a file over network
          * @param port Port to listen on
          * @param timeout Reception timeout in seconds
