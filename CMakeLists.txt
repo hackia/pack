@@ -18,7 +18,6 @@ include_directories(${BLAKE3_INCLUDE_DIRS})
 link_directories(${BLAKE3_LIBRARY_DIRS})
 
 enable_testing()
-add_library(hash libs/include/Hash.hpp libs/src/Hash.cpp)
 add_library(sync libs/include/Sync.hpp libs/src/Sync.cpp)
 add_library(k libs/include/Pack.hpp libs/src/Pack.cpp)
 

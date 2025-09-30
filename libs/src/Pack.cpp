@@ -1,5 +1,7 @@
 #include "../include/Pack.hpp"
-
+#include <cstring>
+#include <iostream>
+#include <sstream>
 #include <filesystem>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -41,6 +43,7 @@ uint8_t Pack::from_hex_nibble(const char c) {
     if ('A' <= c && c <= 'F') return static_cast<uint8_t>(10 + (c - 'A'));
     throw std::runtime_error(std::string("Invalid hex nibble: '") + c + "'");
 }
+
 std::string Pack::to_hex(const uint8_t *data, const size_t len) {
     std::ostringstream oss;
     oss << std::hex << std::setfill('0');
@@ -122,6 +125,7 @@ std::vector<uint8_t> Pack::hash(const std::string &file) {
     blake3_hasher_finalize(&hasher, out.data(), out.size());
     return out;
 }
+
 void Pack::ok(const std::string &message) {
     std::cout << "\033[1;32m* \033[1;37m" << message << "\033[0m" << std::endl;
 }
@@ -164,7 +168,7 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return NETWORK_ERROR;
 
-    struct timeval tv{};
+    timeval tv{};
     tv.tv_sec = timeout;
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
@@ -188,7 +192,6 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
             return NETWORK_ERROR;
         }
     }
-
     close(sock);
     return OK;
 }
@@ -197,9 +200,12 @@ int Pack::receive_file(const std::string &output_path, uint16_t port, unsigned i
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) return NETWORK_ERROR;
 
-    struct timeval tv{};
+    timeval tv{};
     tv.tv_sec = timeout;
     setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
@@ -216,6 +222,7 @@ int Pack::receive_file(const std::string &output_path, uint16_t port, unsigned i
         return NETWORK_ERROR;
     }
 
+    ok("Listening on port " + std::to_string(port));
     sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
     const int client_sock = accept(server_fd, reinterpret_cast<sockaddr *>(&client_addr), &client_len);
@@ -224,6 +231,10 @@ int Pack::receive_file(const std::string &output_path, uint16_t port, unsigned i
         close(server_fd);
         return NETWORK_ERROR;
     }
+
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+    ok("Accepted connection from " + std::string(client_ip));
 
     std::vector<uint8_t> buffer(NET_BUF_SIZE);
     size_t total_received = 0;
@@ -235,21 +246,75 @@ int Pack::receive_file(const std::string &output_path, uint16_t port, unsigned i
         return SYS_ERROR;
     }
 
+    ok("Receiving file to " + output_path);
+
     while (true) {
         const ssize_t bytes_received = recv(client_sock, buffer.data(), buffer.size(), 0);
-        if (bytes_received <= 0) break;
+        if (bytes_received < 0) {
+            ko("Error receiving data");
+            close(client_sock);
+            close(server_fd);
+            return NETWORK_ERROR;
+        }
+        if (bytes_received == 0) break;
 
         ofs.write(reinterpret_cast<char *>(buffer.data()), bytes_received);
         total_received += bytes_received;
+        ok("Received " + std::to_string(total_received) + " bytes");
     }
 
     close(client_sock);
     close(server_fd);
-    return ofs.good() ? OK : SYS_ERROR;
+
+    if (!ofs.good()) {
+        ko("Error writing to file");
+        return SYS_ERROR;
+    }
+
+    ok("File received successfully");
+    return OK;
 }
+
 
 bool Pack::verify_transfer(const std::vector<uint8_t> &original_hash, const std::string &received_file) {
     if (!filesystem::exists(received_file)) return false;
     const auto received_hash = hash(received_file);
     return original_hash == received_hash;
+}
+
+int Pack::delete_file(const char *file_path, const char *host, const uint16_t port, const unsigned int timeout) {
+    const int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return NETWORK_ERROR;
+
+    timeval tv{};
+    tv.tv_sec = timeout;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    sockaddr_in server_addr{};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &server_addr.sin_addr) <= 0) {
+        close(sock);
+        return NETWORK_ERROR;
+    }
+
+    if (connect(sock, reinterpret_cast<sockaddr *>(&server_addr), sizeof(server_addr)) < 0) {
+        close(sock);
+        return NETWORK_ERROR;
+    }
+
+    const std::string delete_cmd = "DELETE " + string(file_path) + "\r\n";
+    if (send(sock, delete_cmd.c_str(), delete_cmd.length(), 0) < 0) {
+        close(sock);
+        return NETWORK_ERROR;
+    }
+
+    char response[128];
+    const ssize_t bytes_received = recv(sock, response, sizeof(response) - 1, 0);
+    close(sock);
+
+    if (bytes_received <= 0) return NETWORK_ERROR;
+    response[bytes_received] = '\0';
+
+    return strncmp(response, "OK", 2) == 0 ? OK : SYS_ERROR;
 }

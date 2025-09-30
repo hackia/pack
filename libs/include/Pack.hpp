@@ -111,7 +111,7 @@ namespace K {
 
         /**
          * @brief Receives a file over network
-         * @param output_path Path to save received file
+         * @param output_path Path to save a received file
          * @param port Port to listen on
          * @param timeout Reception timeout in seconds
          * @return Status code
@@ -128,11 +128,24 @@ namespace K {
         static bool verify_transfer(const std::vector<uint8_t> &original_hash,
                                     const std::string &received_file);
 
+        /**
+         * Deletes a file on a remote server using a network connection.
+         *
+         * @param file_path The path of the file to be deleted.
+         * @param host The hostname or IP address of the remote server.
+         * @param port The port number to connect to on the remote server.
+         * @param timeout The timeout duration (in seconds) for the operation.
+         * @return An integer indicating the result of the operation.
+         * Returns OK on success, NETWORK_ERROR for network-related failures,
+         * or SYS_ERROR for other system-level issues.
+         */
+        static int delete_file(const char *file_path, const char *host, uint16_t port, unsigned int timeout);
+
     protected:
         /**
          * @brief Prepares a chunk of file for network transfer
-         * @param file_path Path to source file
-         * @param offset Offset in file
+         * @param file_path Path to a source file
+         * @param offset Offset in a file
          * @param chunk_size Size of chunk to prepare
          * @return Vector containing chunk data
          */
@@ -157,8 +170,8 @@ namespace K {
          * @brief Structure for network transfer metadata
          */
         struct TransferMetadata {
-            size_t file_size; ///< Size of file being transferred
-            std::vector<uint8_t> file_hash; ///< Hash of file for verification
+            size_t file_size; ///< Size of a file being transferred
+            std::vector<uint8_t> file_hash; ///< Hash of a file for verification
             uint32_t chunk_count; ///< Number of chunks in transfer
             uint16_t protocol_version; ///< Protocol version number
         };
