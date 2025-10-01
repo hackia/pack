@@ -7,10 +7,149 @@
 #include <ctime>    // NOUVEAU
 #include <filesystem>
 #include <cstdlib>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <csignal>
+#include <fstream>
+#include <termios.h>
+#include <unistd.h>
+#include <cctype>
+
 using namespace K;
 using namespace std;
 
 const string VERSION = "1.0.0";
+const int DEFAULT_SYNC_PORT = 8080;
+
+
+namespace {
+    int sync(vector<string> &args) {
+        const std::string &directory = args[1];
+        const std::string &host = args[2];
+
+        // Verify if the directory exists
+        if (!std::filesystem::exists(directory) || !std::filesystem::is_directory(directory)) {
+            Pack::ko("sync: '" + directory + "' is not a valid directory");
+            return Pack::INPUT_NOT_FOUND;
+        }
+
+        std::string home_dir = getenv("HOME");
+        std::string public_key_path = home_dir + "/.pack/id_ed25519.pub";
+        std::string private_key_path = home_dir + "/.pack/id_ed25519";
+
+        KeyManager km;
+        if (!km.loadKeys(public_key_path, private_key_path)) {
+            Pack::ko("Could not load keys from ~/.pack/. Please run 'pack keygen' first.");
+            return Pack::SYS_ERROR;
+        }
+
+        Pack::ok("Syncing directory " + directory + " to " + host);
+        int result = Pack::OK;
+
+        // Iterate through directory
+        for (const auto &entry: std::filesystem::recursive_directory_iterator(directory)) {
+            if (entry.is_regular_file()) {
+                std::string relative_path = std::filesystem::relative(entry.path(), directory).string();
+                Pack::ok("Uploading " + relative_path);
+
+                result = Pack::send_file(entry.path().string(), host, DEFAULT_SYNC_PORT,
+                                         km.getPublicKey(), km.getPrivateKey(),
+                                         Pack::DEFAULT_TIMEOUT);
+                if (result != Pack::OK) {
+                    Pack::ko("Failed to upload " + relative_path);
+                    return result;
+                }
+            }
+        }
+        return result;
+    }
+    void save_history(const string &file, const string &line) {
+        ofstream f(file, ios::app);
+        f << line << endl;
+        f.close();
+    }
+    vector<string> directories() {
+        vector<string> dirs;
+        for (const auto &entry: std::filesystem::directory_iterator(".")) {
+            if (entry.is_directory() && entry.path().filename().string().starts_with(".") == false) {
+                dirs.push_back(entry.path().filename().string());
+            }
+        }
+        return dirs;
+    }
+
+    // Read a line from stdin with basic editing and history navigation (Up/Down) using ~/.pack_history
+    std::string read_line_with_history(const std::string &prompt, const std::string &history_file) {
+        // Load history
+        std::vector<std::string> lines;
+        if (std::ifstream f(history_file); f.is_open()) {
+            std::string l;
+            while (std::getline(f, l)) lines.push_back(l);
+        }
+        size_t index = lines.size(); // one past the last (current input)
+        std::string buf;
+
+        // Setup raw terminal
+        termios oldt{};
+        termios raw{};
+        tcgetattr(STDIN_FILENO, &oldt);
+        raw = oldt;
+        raw.c_lflag &= ~(ICANON | ECHO);
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+        auto refresh = [&](void) {
+            std::cout << "\r" << prompt << buf << "\033[K" << std::flush;
+        };
+
+        // Initial render (prompt already printed by caller, but ensure alignment)
+        refresh();
+
+        while (true) {
+            char c = 0;
+            ssize_t r = ::read(STDIN_FILENO, &c, 1);
+            if (r <= 0) continue;
+            if (c == '\n' || c == '\r') {
+                std::cout << "\n";
+                break;
+            } else if (static_cast<unsigned char>(c) == 127 || c == '\b') { // backspace
+                if (!buf.empty()) {
+                    buf.pop_back();
+                    refresh();
+                }
+            } else if (c == '\x1b') { // escape sequence
+                char seq[2] = {0, 0};
+                if (::read(STDIN_FILENO, &seq[0], 1) != 1) continue;
+                if (::read(STDIN_FILENO, &seq[1], 1) != 1) continue;
+                if (seq[0] == '[') {
+                    if (seq[1] == 'A') { // Up
+                        if (index > 0) {
+                            index--;
+                            buf = lines[index];
+                            refresh();
+                        }
+                    } else if (seq[1] == 'B') { // Down
+                        if (index < lines.size()) {
+                            index++;
+                            if (index == lines.size()) buf.clear();
+                            else buf = lines[index];
+                            refresh();
+                        }
+                    }
+                }
+            } else if (isprint(static_cast<unsigned char>(c))) {
+                buf.push_back(c);
+                refresh();
+            }
+        }
+
+        // Restore terminal
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        return buf;
+    }
+}
 
 void print_help(const char *program) {
     std::cerr << "Usage:\n"
@@ -21,14 +160,205 @@ void print_help(const char *program) {
             << "  " << program << " recv <port>                         # Receive file on port (default: 8080)\n"
             << "  " << program <<
             " keygen                              # Generate a new key pair (id_ed25519, id_ed25519.pub)\n"
-            // <-- LIGNE AJOUTÉE
             << "  " << program << " list                                # List available files\n"
             << "  " << program << " delete <file> <host> <port>         # Delete file from host\n"
+            << "  " << program <<
+            " sync <directory> <host>             # Upload file into the directory to the server\n"
             << "  " << program << " help                                # Show this help\n"
             << "  " << program << " version                             # Show version\n";
 }
 
 int main(const int argc, const char **argv) {
+    if (argc == 1) {
+        string input;
+        vector<string> args;
+        string port;
+        string host;
+        vector<string> folders;
+        const string history = getenv("HOME") + string("/.pack_history");
+        // Enter alternate screen
+        cout << "\033[?1049h\033[H";
+
+        // Set up signal handlers
+        signal(SIGINT, [](int) {
+            cout << "\033[?1049l"; // Exit alternate screen
+            exit(0);
+        });
+
+        while (true) {
+            auto now = std::chrono::system_clock::now();
+            auto current_time = std::chrono::system_clock::to_time_t(now);
+            auto current_path = std::filesystem::current_path();
+            const string PROMPT_TIME_COLOR = "\033[1;35m";
+            const string PROMPT_BRACKET_COLOR = "\033[1;37m";
+            const string PROMPT_NAME_COLOR = "\033[1;32m";
+            const string PROMPT_PATH_COLOR = "\033[1;34m";
+            const string PROMPT_RESET = "\033[0m";
+            folders = directories();
+            std::ostringstream prompt_oss;
+            if (current_path.filename() == getenv("USER")) {
+                prompt_oss << PROMPT_BRACKET_COLOR << "[ "
+                           << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
+                           << PROMPT_BRACKET_COLOR << " ]"
+                           << PROMPT_NAME_COLOR << " pack"
+                           << PROMPT_BRACKET_COLOR << " ~ "
+                           << PROMPT_BRACKET_COLOR << "> "
+                           << PROMPT_RESET;
+            } else {
+                prompt_oss << PROMPT_BRACKET_COLOR << "[ "
+                           << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
+                           << PROMPT_BRACKET_COLOR << " ]"
+                           << PROMPT_NAME_COLOR << " pack"
+                           << PROMPT_BRACKET_COLOR << " ~ "
+                           << PROMPT_PATH_COLOR << current_path.filename().string()
+                           << PROMPT_BRACKET_COLOR << "> "
+                           << PROMPT_RESET;
+            }
+            const std::string prompt_str = prompt_oss.str();
+            // Print prompt once; the line editor will refresh as needed
+            cout << prompt_str << flush;
+            input = read_line_with_history(prompt_str, history);
+            if (input.empty()) continue;
+
+            istringstream iss(input);
+            args.clear();
+            string arg;
+            while (iss >> arg) {
+                args.emplace_back(arg);
+            }
+            if (args[0] == "exit" || args[0] == "quit") {
+                cout << "\033[?1049l"; // Exit alternate screen
+                save_history(history, input);
+                break;
+            }
+            if (args[0] == "help") {
+                cout << "version                          # Show version\n";
+                cout << "help                             # Show this help\n";
+                cout << "cd <directory>                   # checkout of directory\n";
+                cout << "ls                               # list of directories\n";
+                cout << "clear                            # clear screen\n";
+                cout << "cls                              # clear screen\n";
+                cout << "history                          # Show history\n";
+                cout << "history clear                    # Clear command history\n";
+                cout << "history <number>                 # Show history\n";
+                cout << "recv <port>                      # Receive file on port (default: 8080)\n";
+                cout << "list                             # List available files\n";
+                cout << "delete <file> <host> <port>      # Delete file from host\n";
+                cout << "set port <port>                  # Set port for server\n";
+                cout << "set host <host>                  # Set host for server\n";
+                cout << "set key <key>                    # Set key for server\n";
+                cout <<
+                        "keygen                           # Generate a new key pair (id_ed25519, id_ed25519.pub)\n";
+                cout << "encode <input> <output.hex>      # Encode binary file to hex\n";
+                cout << "decode <input.hex> <output>      # Decode hex file to binary\n";
+                cout << "verify <input> <output.hex>      # Verify encode/decode integrity\n";
+                cout << "send <file> <destination>        # Send file or directory to destination\n";
+                cout << "sync <directory> <host>          # Upload files from directory to server\n";
+                cout << "sync <directory>                 # Upload files from directory to server\n";
+                cout << "exit                             # Exit the application\n";
+            }
+            if (args[0] == "set") {
+                if (args[1] == "port") {
+                    try {
+                        port.assign(args[2]);
+                        Pack::ok("Port set to : " + port);
+                    } catch (const std::invalid_argument &e) {
+                        Pack::ko(e.what());
+                        return Pack::USAGE_ERROR;
+                    }
+                }
+                if (args[1] == "host") {
+                    host.assign(args[2]);
+                    Pack::ok("Host set to : " + host);
+                }
+            }
+            if (args[0] == "clear" || args[0] == "cls") {
+                cout << "\033[2J\033[1;1H";
+                save_history(history, input);
+            }
+            if (args[0] == "history") {
+                if (args.size() >= 2 && args[1] == "clear") {
+                    ofstream f(history, ios::trunc);
+                    f.close();
+                    Pack::ok("History cleared");
+                    save_history(history, input);
+                } else {
+                    if (ifstream f(history); f.is_open()) {
+                        string line;
+                        vector<string> lines;
+                        while (getline(f, line)) {
+                            lines.push_back(line);
+                        }
+                        for (int i = static_cast<int>(lines.size()) - 1, n = 1; i >= 0; --i, ++n) {
+                            cout << n << ": " << lines[i] << endl;
+                        }
+                    }
+                    save_history(history, input);
+                }
+            }
+            if (args[0] == "ls") {
+                int i = 0;
+                cout << "\n";
+                Pack::ok("Available directories\n");
+                for (const auto &dir: folders) {
+                    ++i;
+                    if (i % 3 == 0) {
+                        cout << "\033[1;35m" << dir << "\033[0m" << endl << endl;
+                    } else {
+                        cout << "\033[1;35m" << dir << "\033[0m\t";
+                    }
+                }
+                save_history(history, input);
+                cout << "\033[0m" << endl;
+            }
+            if (args[0] == "cd") {
+                if (args.size() == 2) {
+                    if (std::filesystem::exists(args[1])) {
+                        if (std::filesystem::is_directory(args[1])) {
+                            Pack::ok("Changing directory to " + args[1]);
+                            std::filesystem::current_path(args[1]);
+                        } else {
+                            Pack::ko("Not a directory");
+                        }
+                    }
+                }
+                save_history(history, input);
+            }
+            if (args[0] == "sync") {
+                if (args.size() == 3) {
+                    Pack::ok("Syncing directory " + args[1] + " to " + args[2]);
+                    sync(args);
+                }
+                if (args.size() == 2) {
+                    Pack::ok("Syncing directory " + args[1] + " to " + host);
+                    sync(args);
+                }
+                save_history(history, input);
+            }
+            if (args[0] == "keygen") {
+                try {
+                    Pack::ok("Generating new Ed25519 key pair...");
+                    if (KeyManager manager; manager.generateKeys()) {
+                        const char *home_dir = getenv("HOME");
+                        if (home_dir == nullptr) {
+                            Pack::ko("Could not find HOME environment variable.");
+                            return Pack::SYS_ERROR;
+                        }
+                        std::string pack_dir = std::string(home_dir) + "/.pack";
+                    }
+                } catch (const std::exception &e) {
+                    Pack::ko(e.what());
+                    return Pack::SYS_ERROR;
+                }
+                save_history(history, input);
+            }
+            vector<const char *> c_args;
+            for (const auto &arg: args) {
+                c_args.push_back(arg.c_str());
+            }
+        }
+        return Pack::OK;
+    }
     if (argc < 2) {
         print_help(argv[0]);
         return Pack::USAGE_ERROR;
@@ -197,19 +527,63 @@ int main(const int argc, const char **argv) {
         }
 
         if (cmd == "delete") {
-            if (argc != 4) {
+            if (argc != 5) {
                 Pack::ko("delete: require <file> <host> <port>");
                 return Pack::INPUT_NOT_FOUND;
             }
             try {
-                const int port = std::stoi(argv[3]);
-                return Pack::delete_file(argv[1], argv[2], port, Pack::DEFAULT_TIMEOUT);
+                const int port = std::stoi(argv[4]);
+                return Pack::delete_file(argv[2], argv[3], port, Pack::DEFAULT_TIMEOUT);
             } catch (const std::invalid_argument &e) {
                 Pack::ko(e.what());
                 return Pack::USAGE_ERROR;
             }
         }
 
+        if (cmd == "sync") {
+            if (argc != 4) {
+                Pack::ko("sync: require <directory> <host>");
+                return Pack::USAGE_ERROR;
+            }
+            const std::string directory = argv[2];
+            const std::string host = argv[3];
+
+            // Verify if the directory exists
+            if (!std::filesystem::exists(directory) || !std::filesystem::is_directory(directory)) {
+                Pack::ko("sync: '" + directory + "' is not a valid directory");
+                return Pack::INPUT_NOT_FOUND;
+            }
+
+            std::string home_dir = getenv("HOME");
+            std::string public_key_path = home_dir + "/.pack/id_ed25519.pub";
+            std::string private_key_path = home_dir + "/.pack/id_ed25519";
+
+            KeyManager km;
+            if (!km.loadKeys(public_key_path, private_key_path)) {
+                Pack::ko("Could not load keys from ~/.pack/. Please run 'pack keygen' first.");
+                return Pack::SYS_ERROR;
+            }
+
+            Pack::ok("Syncing directory " + directory + " to " + host);
+            int result = Pack::OK;
+
+            // Iterate through directory
+            for (const auto &entry: std::filesystem::recursive_directory_iterator(directory)) {
+                if (entry.is_regular_file()) {
+                    std::string relative_path = std::filesystem::relative(entry.path(), directory).string();
+                    Pack::ok("Uploading " + relative_path);
+
+                    result = Pack::send_file(entry.path().string(), host, DEFAULT_SYNC_PORT,
+                                             km.getPublicKey(), km.getPrivateKey(),
+                                             Pack::DEFAULT_TIMEOUT);
+                    if (result != Pack::OK) {
+                        Pack::ko("Failed to upload " + relative_path);
+                        return result;
+                    }
+                }
+            }
+            return result;
+        }
         Pack::ko("Unknown command: " + cmd);
         print_help(argv[0]);
         return Pack::USAGE_ERROR;

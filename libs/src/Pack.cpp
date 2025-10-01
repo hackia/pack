@@ -170,14 +170,23 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
     }
 
     std::string base_filename = std::filesystem::path(file_path).filename().string();
+
+    // Protocol: send public key, then signature, then NUL-terminated filename, then file content
+    if (send(sock, publicKey.data(), publicKey.size(), 0) < 0) {
+        ko("Failed to send public key");
+        close(sock);
+        return NETWORK_ERROR;
+    }
+    if (send(sock, signature.data(), signature.size(), 0) < 0) {
+        ko("Failed to send signature");
+        close(sock);
+        return NETWORK_ERROR;
+    }
     if (send(sock, base_filename.c_str(), base_filename.length() + 1, 0) < 0) {
         ko("Failed to send filename");
         close(sock);
         return NETWORK_ERROR;
     }
-    send(sock, publicKey.data(), publicKey.size(), 0);
-    send(sock, signature.data(), signature.size(), 0);
-    send(sock, base_filename.c_str(), base_filename.length() + 1, 0);
     std::ifstream ifs(file_path, std::ios::binary);
     if (!ifs) {
         ko("Failed to open file for reading: " + file_path);
@@ -295,16 +304,71 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
             continue;
         }
         ok("Accepted connection from " + std::string(inet_ntoa(client_addr.sin_addr)));
-        std::vector<unsigned char> sender_public_key(crypto_sign_ed25519_PUBLICKEYBYTES);
-        recv(client_sock, sender_public_key.data(), sender_public_key.size(), MSG_WAITALL);
 
-        std::vector<unsigned char> signature(crypto_sign_ed25519_BYTES);
-        recv(client_sock, signature.data(), signature.size(), MSG_WAITALL);
-        std::vector<unsigned char> file_hash(DIGEST_SIZE);
-        char c;
+        // Set receive timeout early
         timeval tv{};
         tv.tv_sec = timeout;
         setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        // Detect DELETE command using peek
+        char peek_buf[8] = {0};
+        ssize_t peeked = recv(client_sock, peek_buf, sizeof(peek_buf), MSG_PEEK);
+        if (peeked > 0) {
+            std::string_view sv(peek_buf, static_cast<size_t>(peeked));
+            if (sv.rfind("DELETE ", 0) == 0) {
+                // Consume the full line
+                std::string line;
+                char ch;
+                while (true) {
+                    ssize_t r = recv(client_sock, &ch, 1, 0);
+                    if (r <= 0) break;
+                    if (ch == '\n') break; // support both CRLF and LF
+                    if (ch == '\r') continue;
+                    line += ch;
+                }
+                // line now starts with "DELETE ", extract path
+                std::string path;
+                if (line.rfind("DELETE ", 0) == 0) {
+                    path = line.substr(7);
+                    // trim spaces
+                    while (!path.empty() && isspace(static_cast<unsigned char>(path.front()))) path.erase(path.begin());
+                    while (!path.empty() && isspace(static_cast<unsigned char>(path.back()))) path.pop_back();
+                }
+                std::string reply;
+                if (path.empty()) {
+                    reply = "ERROR: Missing path\n";
+                } else {
+                    std::error_code ec;
+                    bool removed = std::filesystem::remove(path, ec);
+                    if (removed && !ec) {
+                        reply = "OK\n";
+                    } else {
+                        reply = std::string("ERROR: ") + (ec ? ec.message() : std::string("File not found")) + "\n";
+                    }
+                }
+                send(client_sock, reply.c_str(), reply.size(), 0);
+                close(client_sock);
+                ok(std::string("Processed DELETE for ") + (sv.size() > 7 ? std::string(peek_buf + 7, peeked - 7) : std::string("")));
+                continue; // wait for next client
+            }
+        }
+
+        std::vector<unsigned char> sender_public_key(crypto_sign_ed25519_PUBLICKEYBYTES);
+        if (recv(client_sock, sender_public_key.data(), sender_public_key.size(), MSG_WAITALL) != static_cast<ssize_t>(sender_public_key.size())) {
+            ko("Failed to receive public key");
+            close(client_sock);
+            continue;
+        }
+
+        std::vector<unsigned char> signature(crypto_sign_ed25519_BYTES);
+        if (recv(client_sock, signature.data(), signature.size(), MSG_WAITALL) != static_cast<ssize_t>(signature.size())) {
+            ko("Failed to receive signature");
+            close(client_sock);
+            continue;
+        }
+
+        std::vector<unsigned char> file_hash(DIGEST_SIZE);
+        char c;
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
         std::string original_filename;
@@ -378,6 +442,7 @@ int Pack::delete_file(const char *file_path, const char *host, const uint16_t po
     timeval tv{};
     tv.tv_sec = timeout;
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     sockaddr_in server_addr{};
     server_addr.sin_family = AF_INET;
@@ -392,7 +457,7 @@ int Pack::delete_file(const char *file_path, const char *host, const uint16_t po
         return NETWORK_ERROR;
     }
 
-    const std::string delete_cmd = "DELETE " + string(file_path) + "\r\n";
+    const std::string delete_cmd = "DELETE " + std::string(file_path) + "\r\n";
     if (send(sock, delete_cmd.c_str(), delete_cmd.length(), 0) < 0) {
         close(sock);
         return NETWORK_ERROR;
