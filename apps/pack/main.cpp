@@ -20,11 +20,10 @@ using namespace K;
 using namespace std;
 
 const string VERSION = "1.0.0";
-const int DEFAULT_SYNC_PORT = 8080;
-
+constexpr int DEFAULT_SYNC_PORT = 8080;
 
 namespace {
-    int sync(vector<string> &args) {
+    int sync(const vector<string> &args) {
         const std::string &directory = args[1];
         const std::string &host = args[2];
 
@@ -34,9 +33,9 @@ namespace {
             return Pack::INPUT_NOT_FOUND;
         }
 
-        std::string home_dir = getenv("HOME");
-        std::string public_key_path = home_dir + "/.pack/id_ed25519.pub";
-        std::string private_key_path = home_dir + "/.pack/id_ed25519";
+        const std::string home_dir = getenv("HOME");
+        const std::string public_key_path = home_dir + "/.pack/id_ed25519.pub";
+        const std::string private_key_path = home_dir + "/.pack/id_ed25519";
 
         KeyManager km;
         if (!km.loadKeys(public_key_path, private_key_path)) {
@@ -64,11 +63,13 @@ namespace {
         }
         return result;
     }
+
     void save_history(const string &file, const string &line) {
         ofstream f(file, ios::app);
         f << line << endl;
         f.close();
     }
+
     vector<string> directories() {
         vector<string> dirs;
         for (const auto &entry: std::filesystem::directory_iterator(".")) {
@@ -100,7 +101,7 @@ namespace {
         raw.c_cc[VTIME] = 0;
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
-        auto refresh = [&](void) {
+        auto refresh = [&]() {
             std::cout << "\r" << prompt << buf << "\033[K" << std::flush;
         };
 
@@ -109,28 +110,32 @@ namespace {
 
         while (true) {
             char c = 0;
-            ssize_t r = ::read(STDIN_FILENO, &c, 1);
-            if (r <= 0) continue;
+            if (ssize_t r = read(STDIN_FILENO, &c, 1); r <= 0) continue;
             if (c == '\n' || c == '\r') {
                 std::cout << "\n";
                 break;
-            } else if (static_cast<unsigned char>(c) == 127 || c == '\b') { // backspace
+            }
+            if (static_cast<unsigned char>(c) == 127 || c == '\b') {
+                // backspace
                 if (!buf.empty()) {
                     buf.pop_back();
                     refresh();
                 }
-            } else if (c == '\x1b') { // escape sequence
+            } else if (c == '\x1b') {
+                // escape sequence
                 char seq[2] = {0, 0};
-                if (::read(STDIN_FILENO, &seq[0], 1) != 1) continue;
-                if (::read(STDIN_FILENO, &seq[1], 1) != 1) continue;
+                if (read(STDIN_FILENO, &seq[0], 1) != 1) continue;
+                if (read(STDIN_FILENO, &seq[1], 1) != 1) continue;
                 if (seq[0] == '[') {
-                    if (seq[1] == 'A') { // Up
+                    if (seq[1] == 'A') {
+                        // Up
                         if (index > 0) {
                             index--;
                             buf = lines[index];
                             refresh();
                         }
-                    } else if (seq[1] == 'B') { // Down
+                    } else if (seq[1] == 'B') {
+                        // Down
                         if (index < lines.size()) {
                             index++;
                             if (index == lines.size()) buf.clear();
@@ -144,10 +149,13 @@ namespace {
                 refresh();
             }
         }
-
         // Restore terminal
         tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
         return buf;
+    }
+
+    string get_home_directory() {
+        return getenv("HOME");
     }
 }
 
@@ -175,6 +183,15 @@ int main(const int argc, const char **argv) {
         string port;
         string host;
         vector<string> folders;
+
+        if (ifstream f(string(get_home_directory()) + "/.pack_directories"); f.is_open()) {
+            string line;
+            while (getline(f, line)) {
+                if (!line.empty()) {
+                    folders.push_back(line);
+                }
+            }
+        }
         const string history = getenv("HOME") + string("/.pack_history");
         // Enter alternate screen
         cout << "\033[?1049h\033[H";
@@ -186,34 +203,16 @@ int main(const int argc, const char **argv) {
         });
 
         while (true) {
-            auto now = std::chrono::system_clock::now();
-            auto current_time = std::chrono::system_clock::to_time_t(now);
             auto current_path = std::filesystem::current_path();
             const string PROMPT_TIME_COLOR = "\033[1;35m";
             const string PROMPT_BRACKET_COLOR = "\033[1;37m";
             const string PROMPT_NAME_COLOR = "\033[1;32m";
             const string PROMPT_PATH_COLOR = "\033[1;34m";
             const string PROMPT_RESET = "\033[0m";
-            folders = directories();
             std::ostringstream prompt_oss;
-            if (current_path.filename() == getenv("USER")) {
-                prompt_oss << PROMPT_BRACKET_COLOR << "[ "
-                           << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
-                           << PROMPT_BRACKET_COLOR << " ]"
-                           << PROMPT_NAME_COLOR << " pack"
-                           << PROMPT_BRACKET_COLOR << " ~ "
-                           << PROMPT_BRACKET_COLOR << "> "
-                           << PROMPT_RESET;
-            } else {
-                prompt_oss << PROMPT_BRACKET_COLOR << "[ "
-                           << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
-                           << PROMPT_BRACKET_COLOR << " ]"
-                           << PROMPT_NAME_COLOR << " pack"
-                           << PROMPT_BRACKET_COLOR << " ~ "
-                           << PROMPT_PATH_COLOR << current_path.filename().string()
-                           << PROMPT_BRACKET_COLOR << "> "
-                           << PROMPT_RESET;
-            }
+            prompt_oss << PROMPT_NAME_COLOR << "pack"
+                    << PROMPT_BRACKET_COLOR << "> "
+                    << PROMPT_RESET;
             const std::string prompt_str = prompt_oss.str();
             // Print prompt once; the line editor will refresh as needed
             cout << prompt_str << flush;
@@ -259,17 +258,18 @@ int main(const int argc, const char **argv) {
             }
             if (args[0] == "set") {
                 if (args[1] == "port") {
-                    try {
+                    if (args.size() >= 3) {
                         port.assign(args[2]);
                         Pack::ok("Port set to : " + port);
-                    } catch (const std::invalid_argument &e) {
-                        Pack::ko(e.what());
-                        return Pack::USAGE_ERROR;
+                        save_history(history, input);
                     }
                 }
                 if (args[1] == "host") {
-                    host.assign(args[2]);
-                    Pack::ok("Host set to : " + host);
+                    if (args.size() >= 3) {
+                        host.assign(args[2]);
+                        Pack::ok("Host set to : " + host);
+                        save_history(history, input);
+                    }
                 }
             }
             if (args[0] == "clear" || args[0] == "cls") {
@@ -297,6 +297,7 @@ int main(const int argc, const char **argv) {
                 }
             }
             if (args[0] == "ls") {
+                folders = directories();
                 int i = 0;
                 cout << "\n";
                 Pack::ok("Available directories\n");
@@ -353,8 +354,8 @@ int main(const int argc, const char **argv) {
                 save_history(history, input);
             }
             vector<const char *> c_args;
-            for (const auto &arg: args) {
-                c_args.push_back(arg.c_str());
+            for (const auto &argument: args) {
+                c_args.push_back(argument.c_str());
             }
         }
         return Pack::OK;

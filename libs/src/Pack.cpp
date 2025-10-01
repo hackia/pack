@@ -10,6 +10,8 @@
 #include <sys/socket.h>
 #include <fstream>
 #include <sodium.h>
+#include <sys/ioctl.h>
+
 using namespace K;
 
 void Pack::encode_hex_file(const std::string &in, const std::string &out_hex) {
@@ -73,7 +75,62 @@ uint8_t Pack::from_hex_nibble(const char c) {
 }
 
 void Pack::ko(const std::string &message) {
-    std::cerr << "\033[1;31m! \033[1;37m" << message << "\033[0m" << std::endl;
+    // Emulate OpenRC-style output: "! message .... [ !! ]" right-aligned
+    // Use terminal width when available via ioctl; colorize only if STDERR is a TTY
+    constexpr int fd = STDERR_FILENO;
+    const bool tty = isatty(fd);
+
+    int cols = 0;
+#ifdef TIOCGWINSZ
+    if (tty) {
+        struct winsize ws{};
+        if (ioctl(fd, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
+            cols = ws.ws_col;
+        }
+    }
+#endif
+
+    const std::string status_raw = "[ ko ]";
+    const std::string status_col = tty ? "\033[1;37m[\033[1;31m ko \033[1;37m]\033[0m" : status_raw;
+
+    // Base prefix like OpenRC
+    const std::string prefix = tty ? "\033[1;31m! \033[0m" : "! ";
+
+    // If we know terminal width, pad so status is near the right edge
+    if (cols > 0) {
+        // Reserve at least one space between the message and status
+        std::ostringstream oss;
+        oss << prefix << message << ' ';
+        std::string line = oss.str();
+
+        // Compute printable width ignoring ANSI sequences in prefix
+        auto printable_len = [&](const std::string &s) {
+            size_t count = 0;
+            bool in_esc = false;
+            for (size_t i = 0; i < s.size(); ++i) {
+                auto c = static_cast<unsigned char>(s[i]);
+                if (!in_esc) {
+                    if (c == '\033') in_esc = true;
+                    else ++count;
+                } else {
+                    if (c == 'm') in_esc = false;
+                }
+            }
+            return static_cast<int>(count);
+        };
+
+        const int current = printable_len(line);
+        const int status_len = static_cast<int>(status_raw.size());
+        const int desired = cols - status_len; // position where status starts
+        int padding = desired - current;
+        if (padding < 1) padding = 1; // ensure spacing
+        line.append(static_cast<size_t>(padding), ' ');
+        line += status_col;
+        std::cerr << line << std::endl;
+    } else {
+        // Fallback: simple inline
+        std::cerr << prefix << message << ' ' << status_col << std::endl;
+    }
 }
 
 void Pack::decode_hex_file(const std::string &in_hex, const std::string &out_bin) {
@@ -108,7 +165,58 @@ void Pack::decode_hex_file(const std::string &in_hex, const std::string &out_bin
 
 
 void Pack::ok(const std::string &message) {
-    std::cout << "\033[1;32m* \033[1;37m" << message << "\033[0m" << std::endl;
+    // Emulate OpenRC-style output: " * message .... [ ok ]" right-aligned
+    // Use terminal width when available via ioctl; colorize only if STDOUT is a TTY
+    constexpr int fd = STDOUT_FILENO;
+    const bool tty = isatty(fd);
+
+    int cols = 0;
+#ifdef TIOCGWINSZ
+    if (tty) {
+        struct winsize ws{};
+        if (ioctl(fd, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
+            cols = ws.ws_col;
+        }
+    }
+#endif
+
+    const std::string status_raw = "[ ok ]";
+    const std::string status_col = tty ? "\033[1;37m[\033[1;32m ok \033[1;37m]\033[0m" : status_raw;
+
+    // Base prefix like OpenRC
+    const std::string prefix = tty ? "\033[1;32m* \033[0m" : "* ";
+
+    if (cols > 0) {
+        std::ostringstream oss;
+        oss << prefix << message << ' ';
+        std::string line = oss.str();
+
+        auto printable_len = [](const std::string &s) {
+            size_t count = 0;
+            bool in_esc = false;
+            for (size_t i = 0; i < s.size(); ++i) {
+                const auto c = static_cast<unsigned char>(s[i]);
+                if (!in_esc) {
+                    if (c == '\033') in_esc = true;
+                    else ++count;
+                } else {
+                    if (c == 'm') in_esc = false;
+                }
+            }
+            return static_cast<int>(count);
+        };
+
+        const int current = printable_len(line);
+        const int status_len = static_cast<int>(status_raw.size());
+        const int desired = cols - status_len;
+        int padding = desired - current;
+        if (padding < 1) padding = 1;
+        line.append(static_cast<size_t>(padding), ' ');
+        line += status_col;
+        std::cout << line << std::endl;
+    } else {
+        std::cout << prefix << message << ' ' << status_col << std::endl;
+    }
 }
 
 std::vector<uint8_t> Pack::hash(const std::string &file) {
@@ -348,20 +456,24 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
                 }
                 send(client_sock, reply.c_str(), reply.size(), 0);
                 close(client_sock);
-                ok(std::string("Processed DELETE for ") + (sv.size() > 7 ? std::string(peek_buf + 7, peeked - 7) : std::string("")));
+                ok(std::string("Processed DELETE for ") + (sv.size() > 7
+                                                               ? std::string(peek_buf + 7, peeked - 7)
+                                                               : std::string("")));
                 continue; // wait for next client
             }
         }
 
         std::vector<unsigned char> sender_public_key(crypto_sign_ed25519_PUBLICKEYBYTES);
-        if (recv(client_sock, sender_public_key.data(), sender_public_key.size(), MSG_WAITALL) != static_cast<ssize_t>(sender_public_key.size())) {
+        if (recv(client_sock, sender_public_key.data(), sender_public_key.size(), MSG_WAITALL) != static_cast<ssize_t>(
+                sender_public_key.size())) {
             ko("Failed to receive public key");
             close(client_sock);
             continue;
         }
 
         std::vector<unsigned char> signature(crypto_sign_ed25519_BYTES);
-        if (recv(client_sock, signature.data(), signature.size(), MSG_WAITALL) != static_cast<ssize_t>(signature.size())) {
+        if (recv(client_sock, signature.data(), signature.size(), MSG_WAITALL) != static_cast<ssize_t>(signature.
+                size())) {
             ko("Failed to receive signature");
             close(client_sock);
             continue;
