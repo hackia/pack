@@ -126,7 +126,17 @@ int main(const int argc, const char **argv) {
                 Pack::ko("send: require <file> <destination:port>");
                 return Pack::INPUT_NOT_FOUND;
             }
+            std::string home_dir = getenv("HOME");
+            std::string public_key_path = home_dir + "/.pack/id_ed25519.pub";
+            std::string private_key_path = home_dir + "/.pack/id_ed25519";
 
+            KeyManager km;
+            if (!km.loadKeys(public_key_path, private_key_path)) {
+                Pack::ko("Could not load keys from ~/.pack/. Please run 'pack keygen' first.");
+                return Pack::SYS_ERROR;
+            }
+            const auto &public_key = km.getPublicKey();
+            const auto &private_key = km.getPrivateKey();
             std::string file_path = argv[2];
             std::string destination = argv[3];
 
@@ -160,9 +170,9 @@ int main(const int argc, const char **argv) {
                 Pack::ko(e.what());
                 return Pack::USAGE_ERROR;
             }
-
+            
             Pack::ok("Sending " + file_path + " to " + host + ":" + std::to_string(port));
-            return Pack::send_file(file_path, host, port, Pack::DEFAULT_TIMEOUT);
+            return Pack::send_file(file_path, host, port, public_key, private_key, Pack::DEFAULT_TIMEOUT);
         }
         if (cmd == "recv") {
             try {

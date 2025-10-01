@@ -2,7 +2,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <sodium.h>
-
+using namespace std;
 KeyManager::KeyManager() {
     if (sodium_init() < 0) {
         throw std::runtime_error("Failed to initialize libsodium");
@@ -55,7 +55,7 @@ bool KeyManager::writeFile(const std::string &path, const std::vector<unsigned c
     if (!ofs) {
         return false;
     }
-    ofs.write(reinterpret_cast<const char *>(data.data()), static_cast<long>(data.size()));
+    ofs.write(reinterpret_cast<const char *>(data.data()), static_cast<streamsize>(data.size()));
     return ofs.good();
 }
 

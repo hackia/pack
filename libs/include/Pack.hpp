@@ -99,26 +99,37 @@ namespace K {
         static std::vector<uint8_t> hash(const std::string &file);
 
         /**
-         * @brief Sends a file over network
-         * @param file_path Path to file to send
-         * @param host Destination host
-         * @param port Destination port
-         * @param timeout Connection timeout in seconds
-         * @return Status code
+         * Sends a file to a remote host over a specified network connection.
+         *
+         * @param file_path The path to the file to be sent.
+         * @param host The hostname or IP address of the remote server.
+         * @param port The port number on which the remote server is listening to.
+         * @param publicKey The public key used for the connection, typically for verification.
+         * @param privateKey The private key used for signing the file hash.
+         * @param timeout The timeout duration (in seconds) for network operations.
+         * @return An integer status code indicating the result of the operation.
+         *         Possible values are INPUT_NOT_FOUND, NETWORK_ERROR, or OK on success.
          */
         static int send_file(const std::string &file_path, const std::string &host,
-                             uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
+                             uint16_t port, const std::vector<unsigned char> &publicKey,
+                             const std::vector<unsigned char> &privateKey,
+                             unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
-        * @brief Sends a file over network
-        * @param file_path Path to file to send
-        * @param host Destination host
-        * @param port Destination port
-        * @param timeout Connection timeout in seconds
-        * @return Status code
-        */
-        static int send_directory(const std::string &file_path, const std::string &host,
-                             uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
+         * Sends the contents of a specified directory to a remote host over a given port.
+         *
+         * @param file_path The path to the directory to be sent. Must point to a valid directory.
+         * @param host The hostname or IP address of the remote server.
+         * @param port The port number of the remote server connection.
+         * @param publicKey The public key for encryption during the transmission.
+         * @param privateKey The private key for encryption during the transmission.
+         * @param timeout The timeout period for the connection in milliseconds.
+         * @return The status code of the operation. Returns `OK` on success or an error code on failure.
+         */
+        static int send_directory(const std::string &file_path, const std::string &host, uint16_t port,
+                                  const std::vector<unsigned char> &publicKey,
+                                  const std::vector<unsigned char> &privateKey,
+                                  unsigned int timeout);
 
         /**
          * @brief Receives a file over network

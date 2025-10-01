@@ -3,9 +3,6 @@
 #include <string>
 #include <vector>
 
-// Include libsodium header
-
-
 class KeyManager {
 public:
     /**

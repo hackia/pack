@@ -9,7 +9,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <fstream>
-#include <filesystem>
+#include <sodium.h>
 using namespace K;
 
 void Pack::encode_hex_file(const std::string &in, const std::string &out_hex) {
@@ -130,13 +130,20 @@ std::vector<uint8_t> Pack::hash(const std::string &file) {
     return out;
 }
 
-// Dans Pack.cpp
-int Pack::send_file(const std::string &file_path, const std::string &host, uint16_t port, unsigned int timeout) {
+int Pack::send_file(const std::string &file_path, const std::string &host, uint16_t port,
+                    const std::vector<unsigned char> &publicKey, const std::vector<unsigned char> &privateKey,
+                    unsigned int timeout) {
     if (!std::filesystem::exists(file_path)) {
         ko("Input file not found: " + file_path);
         return INPUT_NOT_FOUND;
     }
 
+    auto file_hash = hash(file_path);
+
+    std::vector<unsigned char> signature(crypto_sign_ed25519_BYTES);
+    crypto_sign_detached(signature.data(), nullptr,
+                         file_hash.data(), file_hash.size(),
+                         privateKey.data());
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         ko("Socket creation error");
@@ -162,15 +169,15 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
         return NETWORK_ERROR;
     }
 
-    // Étape 1 : Envoyer le nom du fichier original
     std::string base_filename = std::filesystem::path(file_path).filename().string();
     if (send(sock, base_filename.c_str(), base_filename.length() + 1, 0) < 0) {
         ko("Failed to send filename");
         close(sock);
         return NETWORK_ERROR;
     }
-
-    // Étape 2 : Envoyer le contenu du fichier
+    send(sock, publicKey.data(), publicKey.size(), 0);
+    send(sock, signature.data(), signature.size(), 0);
+    send(sock, base_filename.c_str(), base_filename.length() + 1, 0);
     std::ifstream ifs(file_path, std::ios::binary);
     if (!ifs) {
         ko("Failed to open file for reading: " + file_path);
@@ -179,28 +186,29 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
     }
 
     std::vector<char> buffer(NET_BUF_SIZE);
-    while (ifs.read(buffer.data(), buffer.size())) {
-        if (send(sock, buffer.data(), ifs.gcount(), 0) < 0) {
+    while (ifs.read(buffer.data(), static_cast<streamsize>(buffer.size()))) {
+        if (send(sock, buffer.data(), static_cast<size_t>(ifs.gcount()), 0) < 0) {
             ko("Failed to send file content");
             close(sock);
             return NETWORK_ERROR;
         }
     }
-    // Gérer le dernier morceau si le fichier n'est pas un multiple de la taille du buffer
     if (ifs.gcount() > 0) {
-        if (send(sock, buffer.data(), ifs.gcount(), 0) < 0) {
+        if (send(sock, buffer.data(), static_cast<size_t>(ifs.gcount()), 0) < 0) {
             ko("Failed to send final file content chunk");
             close(sock);
             return NETWORK_ERROR;
         }
     }
-
+    ifs.close();
     ok("File sent successfully.");
     close(sock);
     return OK;
 }
 
-int Pack::send_directory(const std::string &file_path, const std::string &host, uint16_t port, unsigned int timeout) {
+int Pack::send_directory(const std::string &file_path, const std::string &host, uint16_t port,
+                         const std::vector<unsigned char> &publicKey, const std::vector<unsigned char> &privateKey,
+                         unsigned int timeout) {
     if (!std::filesystem::exists(file_path)) {
         ko("Directory not found: " + file_path);
         return INPUT_NOT_FOUND;
@@ -234,10 +242,11 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
     int result = OK;
     for (const auto &entry: std::filesystem::recursive_directory_iterator(file_path)) {
         if (entry.is_regular_file()) {
-            std::string relative_path = std::filesystem::relative(entry.path(), file_path).string();
-            if (!should_ignore(relative_path)) {
+            if (std::string relative_path = std::filesystem::relative(entry.path(), file_path).string(); !should_ignore(
+                relative_path)) {
                 ok("Sending file: " + relative_path);
-                if (const int send_result = send_file(entry.path().string(), host, port, timeout); send_result != OK) {
+                if (const int send_result = send_file(entry.path().string(), host, port, publicKey, privateKey, timeout)
+                    ; send_result != OK) {
                     ko("Failed to send: " + relative_path);
                     result = send_result;
                 }
@@ -247,8 +256,7 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
     return result;
 }
 
-// Dans Pack.cpp
-int Pack::receive_file(uint16_t port,unsigned int timeout) {
+int Pack::receive_file(uint16_t port, unsigned int timeout) {
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         ko("Socket creation error");
@@ -286,15 +294,19 @@ int Pack::receive_file(uint16_t port,unsigned int timeout) {
             ko("Accept failed, continuing to listen...");
             continue;
         }
+        ok("Accepted connection from " + std::string(inet_ntoa(client_addr.sin_addr)));
+        std::vector<unsigned char> sender_public_key(crypto_sign_ed25519_PUBLICKEYBYTES);
+        recv(client_sock, sender_public_key.data(), sender_public_key.size(), MSG_WAITALL);
+
+        std::vector<unsigned char> signature(crypto_sign_ed25519_BYTES);
+        recv(client_sock, signature.data(), signature.size(), MSG_WAITALL);
+        std::vector<unsigned char> file_hash(DIGEST_SIZE);
+        char c;
         timeval tv{};
         tv.tv_sec = timeout;
         setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-        ok("Accepted connection from " + std::string(client_ip));
-
-        char c;
         std::string original_filename;
         while (recv(client_sock, &c, 1, 0) > 0 && c != '\0') {
             original_filename += c;
@@ -315,7 +327,7 @@ int Pack::receive_file(uint16_t port,unsigned int timeout) {
         std::stringstream ss_date;
         ss_date << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d");
 
-        std::string final_filename = stem + "_" + ss_date.str() + ext;
+        std::string final_filename = stem + "_" + ss_date.str() + string(ext);
 
         std::ofstream ofs(final_filename, std::ios::binary | std::ios::trunc);
         if (!ofs) {
@@ -324,7 +336,7 @@ int Pack::receive_file(uint16_t port,unsigned int timeout) {
             continue;
         }
 
-        ok("Receiving file to " + final_filename);
+
         std::vector<uint8_t> buffer(NET_BUF_SIZE);
         size_t total_received = 0;
         ssize_t bytes_received;
@@ -337,6 +349,16 @@ int Pack::receive_file(uint16_t port,unsigned int timeout) {
         close(client_sock);
         ok("Finished with client " + std::string(client_ip) + ". Received " + std::to_string(total_received) +
            " bytes into " + final_filename);
+        ok("Verifying signature...");
+        auto received_hash = hash(final_filename);
+        if (crypto_sign_verify_detached(signature.data(),
+                                        received_hash.data(), received_hash.size(),
+                                        sender_public_key.data()) == 0) {
+            ok("Signature is valid. Transfer complete.");
+        } else {
+            ko("!!! SIGNATURE VERIFICATION FAILED !!! The file is corrupted or not authentic.");
+            std::filesystem::remove(final_filename);
+        }
         ok("Waiting for new connection...");
     }
 
@@ -392,9 +414,9 @@ std::vector<uint8_t> Pack::prepare_file_chunk(const std::string &file_path, size
     std::ifstream ifs(file_path, std::ios::binary);
     if (!ifs) throw std::system_error(errno, std::generic_category(), "Failed to open file: " + file_path);
 
-    ifs.seekg(offset);
+    ifs.seekg(static_cast<streamoff>(offset));
     std::vector<uint8_t> chunk(chunk_size);
-    ifs.read(reinterpret_cast<char *>(chunk.data()), chunk_size);
+    ifs.read(reinterpret_cast<char *>(chunk.data()), static_cast<streamsize>(chunk_size));
     chunk.resize(ifs.gcount());
     return chunk;
 }
@@ -403,7 +425,7 @@ bool Pack::write_chunk(const std::string &file_path, const std::vector<uint8_t> 
     std::ofstream ofs(file_path, std::ios::binary | std::ios::in | std::ios::out);
     if (!ofs) return false;
 
-    ofs.seekp(offset);
-    ofs.write(reinterpret_cast<const char *>(chunk.data()), chunk.size());
+    ofs.seekp(static_cast<streamoff>(offset));
+    ofs.write(reinterpret_cast<const char *>(chunk.data()), static_cast<streamsize>(chunk.size()));
     return ofs.good();
 }
