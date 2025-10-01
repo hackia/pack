@@ -1,10 +1,12 @@
 #include "../../libs/include/Pack.hpp"
+#include "../../libs/include/KeyManager.hpp"
 #include <chrono>   // NOUVEAU
 #include <cstring>
 #include <sstream>  // NOUVEAU
 #include <iomanip>  // NOUVEAU
 #include <ctime>    // NOUVEAU
 #include <filesystem>
+#include <cstdlib>
 using namespace K;
 using namespace std;
 
@@ -17,6 +19,9 @@ void print_help(const char *program) {
             << "  " << program << " verify <input> <output.hex>         # Verify encode/decode integrity\n"
             << "  " << program << " send <file> <destination>           # Send file to destination\n"
             << "  " << program << " recv <port>                         # Receive file on port (default: 8080)\n"
+            << "  " << program <<
+            " keygen                              # Generate a new key pair (id_ed25519, id_ed25519.pub)\n"
+            // <-- LIGNE AJOUTÉE
             << "  " << program << " list                                # List available files\n"
             << "  " << program << " delete <file> <host> <port>         # Delete file from host\n"
             << "  " << program << " help                                # Show this help\n"
@@ -41,6 +46,38 @@ int main(const int argc, const char **argv) {
             return Pack::OK;
         }
 
+        if (cmd == "keygen") {
+            try {
+                Pack::ok("Generating new Ed25519 key pair...");
+                if (KeyManager manager; manager.generateKeys()) {
+                    const char *home_dir = getenv("HOME");
+                    if (home_dir == nullptr) {
+                        Pack::ko("Could not find HOME environment variable.");
+                        return Pack::SYS_ERROR;
+                    }
+                    std::string pack_dir = std::string(home_dir) + "/.pack";
+
+                    std::filesystem::create_directory(pack_dir);
+
+                    const std::string public_key_path = pack_dir + "/id_ed25519.pub";
+                    if (const std::string private_key_path = pack_dir + "/id_ed25519"; manager.saveKeys(
+                        public_key_path, private_key_path)) {
+                        Pack::ok("Success! Keys saved to 'id_ed25519.pub' (public) and 'id_ed25519' (private).");
+                        Pack::ok("IMPORTANT: Share the public key, but KEEP THE PRIVATE KEY SECRET!");
+                    } else {
+                        Pack::ko("Failed to save keys to files.");
+                        return Pack::SYS_ERROR;
+                    }
+                } else {
+                    Pack::ko("Failed to generate keys.");
+                    return Pack::SYS_ERROR;
+                }
+                return Pack::OK;
+            } catch (const std::exception &e) {
+                Pack::ko(e.what());
+                return Pack::SYS_ERROR;
+            }
+        }
         if (cmd == "encode") {
             if (argc != 4) {
                 Pack::ko("encode: require <input> <output.hex>");
