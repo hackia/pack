@@ -154,7 +154,7 @@ int main(const int argc, const char **argv) {
                     Pack::ko(e.what());
                     return Pack::USAGE_ERROR;
                 }
-                return Pack::send_directory(file_path, host, port, Pack::DEFAULT_TIMEOUT);
+                return Pack::send_directory(file_path, host, port, public_key, private_key, Pack::DEFAULT_TIMEOUT);
             }
             size_t colon_pos = destination.find(':');
             if (colon_pos == std::string::npos) {
@@ -170,7 +170,7 @@ int main(const int argc, const char **argv) {
                 Pack::ko(e.what());
                 return Pack::USAGE_ERROR;
             }
-            
+
             Pack::ok("Sending " + file_path + " to " + host + ":" + std::to_string(port));
             return Pack::send_file(file_path, host, port, public_key, private_key, Pack::DEFAULT_TIMEOUT);
         }
