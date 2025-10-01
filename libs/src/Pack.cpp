@@ -325,8 +325,7 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
         std::stringstream ss_date;
-        ss_date << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d");
-
+        ss_date << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
         std::string final_filename = stem + "_" + ss_date.str() + string(ext);
 
         std::ofstream ofs(final_filename, std::ios::binary | std::ios::trunc);
