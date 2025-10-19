@@ -8,6 +8,7 @@
 #include <bits/socket.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <fstream>
 #include <sodium.h>
 using namespace K;
@@ -154,16 +155,30 @@ int Pack::send_file(const std::string &file_path, const std::string &host, uint1
     tv.tv_sec = timeout;
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    sockaddr_in server_addr{};
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, host.c_str(), &server_addr.sin_addr) <= 0) {
-        ko("Invalid address or address not supported");
+    // Resolve host (supports hostnames and IPv4/IPv6)
+    addrinfo hints{};
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    addrinfo *res = nullptr;
+    const std::string port_str = std::to_string(port);
+    if (int err = getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res); err != 0) {
+        ko(std::string("getaddrinfo failed: ") + gai_strerror(err));
         close(sock);
         return NETWORK_ERROR;
     }
 
-    if (connect(sock, reinterpret_cast<sockaddr *>(&server_addr), sizeof(server_addr)) < 0) {
+    bool connected = false;
+    for (addrinfo *rp = res; rp != nullptr; rp = rp->ai_next) {
+        if (connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) {
+            connected = true;
+            break;
+        }
+    }
+    freeaddrinfo(res);
+
+    if (!connected) {
         ko("Connection Failed");
         close(sock);
         return NETWORK_ERROR;
@@ -538,16 +553,30 @@ int K::Pack::send_file(const std::string &file_path, const std::string &remote_n
     tv.tv_sec = timeout;
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    sockaddr_in server_addr{};
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, host.c_str(), &server_addr.sin_addr) <= 0) {
-        ko("Invalid address or address not supported");
+    // Resolve host (supports hostnames and IPv4/IPv6)
+    addrinfo hints{};
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    addrinfo *res = nullptr;
+    const std::string port_str = std::to_string(port);
+    if (int err = getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res); err != 0) {
+        ko(std::string("getaddrinfo failed: ") + gai_strerror(err));
         close(sock);
         return NETWORK_ERROR;
     }
 
-    if (connect(sock, reinterpret_cast<sockaddr *>(&server_addr), sizeof(server_addr)) < 0) {
+    bool connected = false;
+    for (addrinfo *rp = res; rp != nullptr; rp = rp->ai_next) {
+        if (connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) {
+            connected = true;
+            break;
+        }
+    }
+    freeaddrinfo(res);
+
+    if (!connected) {
         ko("Connection Failed");
         close(sock);
         return NETWORK_ERROR;
