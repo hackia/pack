@@ -20,11 +20,10 @@ using namespace K;
 using namespace std;
 
 const string VERSION = "1.0.0";
-const int DEFAULT_SYNC_PORT = 8080;
-
+constexpr int DEFAULT_SYNC_PORT = 8080;
 
 namespace {
-    int sync(vector<string> &args) {
+    int sync(const vector<string> &args) {
         const std::string &directory = args[1];
         const std::string &host = args[2];
 
@@ -34,9 +33,9 @@ namespace {
             return Pack::INPUT_NOT_FOUND;
         }
 
-        std::string home_dir = getenv("HOME");
-        std::string public_key_path = home_dir + "/.pack/id_ed25519.pub";
-        std::string private_key_path = home_dir + "/.pack/id_ed25519";
+        const std::string home_dir = getenv("HOME");
+        const std::string public_key_path = home_dir + "/.pack/id_ed25519.pub";
+        const std::string private_key_path = home_dir + "/.pack/id_ed25519";
 
         KeyManager km;
         if (!km.loadKeys(public_key_path, private_key_path)) {
@@ -64,11 +63,13 @@ namespace {
         }
         return result;
     }
+
     void save_history(const string &file, const string &line) {
         ofstream f(file, ios::app);
         f << line << endl;
         f.close();
     }
+
     vector<string> directories() {
         vector<string> dirs;
         for (const auto &entry: std::filesystem::directory_iterator(".")) {
@@ -100,7 +101,7 @@ namespace {
         raw.c_cc[VTIME] = 0;
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 
-        auto refresh = [&](void) {
+        auto refresh = [&] {
             std::cout << "\r" << prompt << buf << "\033[K" << std::flush;
         };
 
@@ -114,23 +115,27 @@ namespace {
             if (c == '\n' || c == '\r') {
                 std::cout << "\n";
                 break;
-            } else if (static_cast<unsigned char>(c) == 127 || c == '\b') { // backspace
+            } else if (static_cast<unsigned char>(c) == 127 || c == '\b') {
+                // backspace
                 if (!buf.empty()) {
                     buf.pop_back();
                     refresh();
                 }
-            } else if (c == '\x1b') { // escape sequence
+            } else if (c == '\x1b') {
+                // escape sequence
                 char seq[2] = {0, 0};
                 if (::read(STDIN_FILENO, &seq[0], 1) != 1) continue;
                 if (::read(STDIN_FILENO, &seq[1], 1) != 1) continue;
                 if (seq[0] == '[') {
-                    if (seq[1] == 'A') { // Up
+                    if (seq[1] == 'A') {
+                        // Up
                         if (index > 0) {
                             index--;
                             buf = lines[index];
                             refresh();
                         }
-                    } else if (seq[1] == 'B') { // Down
+                    } else if (seq[1] == 'B') {
+                        // Down
                         if (index < lines.size()) {
                             index++;
                             if (index == lines.size()) buf.clear();
@@ -198,21 +203,21 @@ int main(const int argc, const char **argv) {
             std::ostringstream prompt_oss;
             if (current_path.filename() == getenv("USER")) {
                 prompt_oss << PROMPT_BRACKET_COLOR << "[ "
-                           << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
-                           << PROMPT_BRACKET_COLOR << " ]"
-                           << PROMPT_NAME_COLOR << " pack"
-                           << PROMPT_BRACKET_COLOR << " ~ "
-                           << PROMPT_BRACKET_COLOR << "> "
-                           << PROMPT_RESET;
+                        << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
+                        << PROMPT_BRACKET_COLOR << " ]"
+                        << PROMPT_NAME_COLOR << " pack"
+                        << PROMPT_BRACKET_COLOR << " ~ "
+                        << PROMPT_BRACKET_COLOR << "> "
+                        << PROMPT_RESET;
             } else {
                 prompt_oss << PROMPT_BRACKET_COLOR << "[ "
-                           << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
-                           << PROMPT_BRACKET_COLOR << " ]"
-                           << PROMPT_NAME_COLOR << " pack"
-                           << PROMPT_BRACKET_COLOR << " ~ "
-                           << PROMPT_PATH_COLOR << current_path.filename().string()
-                           << PROMPT_BRACKET_COLOR << "> "
-                           << PROMPT_RESET;
+                        << PROMPT_TIME_COLOR << std::put_time(std::localtime(&current_time), "%H:%M:%S")
+                        << PROMPT_BRACKET_COLOR << " ]"
+                        << PROMPT_NAME_COLOR << " pack"
+                        << PROMPT_BRACKET_COLOR << " ~ "
+                        << PROMPT_PATH_COLOR << current_path.filename().string()
+                        << PROMPT_BRACKET_COLOR << "> "
+                        << PROMPT_RESET;
             }
             const std::string prompt_str = prompt_oss.str();
             // Print prompt once; the line editor will refresh as needed
@@ -262,6 +267,7 @@ int main(const int argc, const char **argv) {
                     try {
                         port.assign(args[2]);
                         Pack::ok("Port set to : " + port);
+                        save_history(history, input);
                     } catch (const std::invalid_argument &e) {
                         Pack::ko(e.what());
                         return Pack::USAGE_ERROR;
@@ -269,6 +275,7 @@ int main(const int argc, const char **argv) {
                 }
                 if (args[1] == "host") {
                     host.assign(args[2]);
+                    save_history(history, input);
                     Pack::ok("Host set to : " + host);
                 }
             }
@@ -345,6 +352,21 @@ int main(const int argc, const char **argv) {
                             return Pack::SYS_ERROR;
                         }
                         std::string pack_dir = std::string(home_dir) + "/.pack";
+
+                        std::filesystem::create_directory(pack_dir);
+
+                        const std::string public_key_path = pack_dir + "/id_ed25519.pub";
+                        const std::string private_key_path = pack_dir + "/id_ed25519";
+                        if (manager.saveKeys(public_key_path, private_key_path)) {
+                            Pack::ok("Success! Keys saved to 'id_ed25519.pub' (public) and 'id_ed25519' (private).");
+                            Pack::ok("IMPORTANT: Share the public key, but KEEP THE PRIVATE KEY SECRET!");
+                        } else {
+                            Pack::ko("Failed to save keys to files.");
+                            return Pack::SYS_ERROR;
+                        }
+                    } else {
+                        Pack::ko("Failed to generate keys.");
+                        return Pack::SYS_ERROR;
                     }
                 } catch (const std::exception &e) {
                     Pack::ko(e.what());
@@ -353,8 +375,8 @@ int main(const int argc, const char **argv) {
                 save_history(history, input);
             }
             vector<const char *> c_args;
-            for (const auto &arg: args) {
-                c_args.push_back(arg.c_str());
+            for (const auto &a: args) {
+                c_args.push_back(a.c_str());
             }
         }
         return Pack::OK;
