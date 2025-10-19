@@ -266,6 +266,12 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
 }
 
 [[noreturn]] void Pack::receive_file(uint16_t port, unsigned int timeout) {
+    // Ensure libsodium is initialized before any signature verification
+    if (sodium_init() < 0) {
+        ko("Failed to initialize libsodium");
+        exit(SYS_ERROR);
+    }
+
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         ko("Socket creation error");
