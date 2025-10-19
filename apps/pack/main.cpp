@@ -56,7 +56,7 @@ namespace {
                 std::string relative_path = std::filesystem::relative(entry.path(), directory).string();
                 Pack::ok("Uploading " + relative_path);
 
-                result = Pack::send_file(entry.path().string(), host, DEFAULT_SYNC_PORT,
+                result = Pack::send_file(entry.path().string(), relative_path, host, DEFAULT_SYNC_PORT,
                                          km.getPublicKey(), km.getPrivateKey(),
                                          Pack::DEFAULT_TIMEOUT);
                 if (result != Pack::OK) {
@@ -646,7 +646,7 @@ int main(const int argc, const char **argv) {
                     std::string relative_path = std::filesystem::relative(entry.path(), directory).string();
                     Pack::ok("Uploading " + relative_path);
 
-                    result = Pack::send_file(entry.path().string(), host, DEFAULT_SYNC_PORT,
+                    result = Pack::send_file(entry.path().string(), relative_path, host, DEFAULT_SYNC_PORT,
                                              km.getPublicKey(), km.getPrivateKey(),
                                              Pack::DEFAULT_TIMEOUT);
                     if (result != Pack::OK) {

@@ -383,19 +383,30 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
             continue;
         }
 
-        std::filesystem::path p(original_filename);
-        std::string stem = p.stem().string();
-        std::string ext = p.extension().string();
+        std::string target_path;
+        bool has_dir = (original_filename.find('/') != std::string::npos) || (original_filename.find('\\') != std::string::npos);
+        if (has_dir) {
+            std::filesystem::path rp(original_filename);
+            if (rp.is_absolute()) {
+                rp = rp.relative_path();
+            }
+            std::error_code ec;
+            std::filesystem::create_directories(rp.parent_path(), ec);
+            target_path = rp.string();
+        } else {
+            std::filesystem::path p(original_filename);
+            std::string stem = p.stem().string();
+            std::string ext = p.extension().string();
+            auto now = std::chrono::system_clock::now();
+            auto in_time_t = std::chrono::system_clock::to_time_t(now);
+            std::stringstream ss_date;
+            ss_date << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
+            target_path = stem + "_" + ss_date.str() + std::string(ext);
+        }
 
-        auto now = std::chrono::system_clock::now();
-        auto in_time_t = std::chrono::system_clock::to_time_t(now);
-        std::stringstream ss_date;
-        ss_date << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
-        std::string final_filename = stem + "_" + ss_date.str() + string(ext);
-
-        std::ofstream ofs(final_filename, std::ios::binary | std::ios::trunc);
+        std::ofstream ofs(target_path, std::ios::binary | std::ios::trunc);
         if (!ofs) {
-            ko("Could not open file for writing: " + final_filename);
+            ko("Could not open file for writing: " + target_path);
             close(client_sock);
             continue;
         }
@@ -412,16 +423,16 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
         ofs.close();
         close(client_sock);
         ok("Finished with client " + std::string(client_ip) + ". Received " + std::to_string(total_received) +
-           " bytes into " + final_filename);
+           " bytes into " + target_path);
         ok("Verifying signature...");
-        auto received_hash = hash(final_filename);
+        auto received_hash = hash(target_path);
         if (crypto_sign_verify_detached(signature.data(),
                                         received_hash.data(), received_hash.size(),
                                         sender_public_key.data()) == 0) {
             ok("Signature is valid. Transfer complete.");
         } else {
             ko("!!! SIGNATURE VERIFICATION FAILED !!! The file is corrupted or not authentic.");
-            std::filesystem::remove(final_filename);
+            std::filesystem::remove(target_path);
         }
         ok("Waiting for new connection...");
     }
@@ -492,4 +503,91 @@ bool Pack::write_chunk(const std::string &file_path, const std::vector<uint8_t> 
     ofs.seekp(static_cast<streamoff>(offset));
     ofs.write(reinterpret_cast<const char *>(chunk.data()), static_cast<streamsize>(chunk.size()));
     return ofs.good();
+}
+
+
+int K::Pack::send_file(const std::string &file_path, const std::string &remote_name,
+                    const std::string &host, uint16_t port,
+                    const std::vector<unsigned char> &publicKey, const std::vector<unsigned char> &privateKey,
+                    unsigned int timeout) {
+    if (!std::filesystem::exists(file_path)) {
+        ko("Input file not found: " + file_path);
+        return INPUT_NOT_FOUND;
+    }
+
+    auto file_hash = hash(file_path);
+
+    std::vector<unsigned char> signature(crypto_sign_ed25519_BYTES);
+    crypto_sign_detached(signature.data(), nullptr,
+                         file_hash.data(), file_hash.size(),
+                         privateKey.data());
+
+    const int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        ko("Socket creation error");
+        return NETWORK_ERROR;
+    }
+
+    timeval tv{};
+    tv.tv_sec = timeout;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    sockaddr_in server_addr{};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host.c_str(), &server_addr.sin_addr) <= 0) {
+        ko("Invalid address or address not supported");
+        close(sock);
+        return NETWORK_ERROR;
+    }
+
+    if (connect(sock, reinterpret_cast<sockaddr *>(&server_addr), sizeof(server_addr)) < 0) {
+        ko("Connection Failed");
+        close(sock);
+        return NETWORK_ERROR;
+    }
+
+    // Protocol: send public key, then signature, then NUL-terminated remote_name, then file content
+    if (send(sock, publicKey.data(), publicKey.size(), 0) < 0) {
+        ko("Failed to send public key");
+        close(sock);
+        return NETWORK_ERROR;
+    }
+    if (send(sock, signature.data(), signature.size(), 0) < 0) {
+        ko("Failed to send signature");
+        close(sock);
+        return NETWORK_ERROR;
+    }
+    if (send(sock, remote_name.c_str(), remote_name.length() + 1, 0) < 0) {
+        ko("Failed to send filename");
+        close(sock);
+        return NETWORK_ERROR;
+    }
+
+    std::ifstream ifs(file_path, std::ios::binary);
+    if (!ifs) {
+        ko("Failed to open file for reading: " + file_path);
+        close(sock);
+        return SYS_ERROR;
+    }
+
+    std::vector<char> buffer(NET_BUF_SIZE);
+    while (ifs.read(buffer.data(), static_cast<streamsize>(buffer.size()))) {
+        if (send(sock, buffer.data(), static_cast<size_t>(ifs.gcount()), 0) < 0) {
+            ko("Failed to send file content");
+            close(sock);
+            return NETWORK_ERROR;
+        }
+    }
+    if (ifs.gcount() > 0) {
+        if (send(sock, buffer.data(), static_cast<size_t>(ifs.gcount()), 0) < 0) {
+            ko("Failed to send final file content chunk");
+            close(sock);
+            return NETWORK_ERROR;
+        }
+    }
+    ifs.close();
+    ok("File sent successfully.");
+    close(sock);
+    return OK;
 }
