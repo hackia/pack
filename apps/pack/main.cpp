@@ -20,10 +20,14 @@ using namespace K;
 using namespace std;
 
 const string VERSION = "1.0.0";
-constexpr int DEFAULT_SYNC_PORT = 8080;
+constexpr uint16_t DEFAULT_SYNC_PORT = 8080;
 
 namespace {
     int sync(const vector<string> &args) {
+        if (args.size() < 3) {
+            Pack::ko("sync: require <directory> <host>");
+            return Pack::USAGE_ERROR;
+        }
         const std::string &directory = args[1];
         const std::string &host = args[2];
 
@@ -231,6 +235,9 @@ int main(const int argc, const char **argv) {
             while (iss >> arg) {
                 args.emplace_back(arg);
             }
+            if (args.empty()) {
+                continue;
+            }
             if (args[0] == "exit" || args[0] == "quit") {
                 cout << "\033[?1049l"; // Exit alternate screen
                 save_history(history, input);
@@ -263,20 +270,20 @@ int main(const int argc, const char **argv) {
                 cout << "exit                             # Exit the application\n";
             }
             if (args[0] == "set") {
-                if (args[1] == "port") {
-                    try {
-                        port.assign(args[2]);
-                        Pack::ok("Port set to : " + port);
-                        save_history(history, input);
-                    } catch (const std::invalid_argument &e) {
-                        Pack::ko(e.what());
-                        return Pack::USAGE_ERROR;
-                    }
-                }
-                if (args[1] == "host") {
-                    host.assign(args[2]);
+                if (args.size() < 3) {
+                    Pack::ko("Usage: set port <port> | set host <host>");
                     save_history(history, input);
+                } else if (args[1] == "port") {
+                    port.assign(args[2]);
+                    Pack::ok("Port set to : " + port);
+                    save_history(history, input);
+                } else if (args[1] == "host") {
+                    host.assign(args[2]);
                     Pack::ok("Host set to : " + host);
+                    save_history(history, input);
+                } else {
+                    Pack::ko("Unknown setting: " + args[1]);
+                    save_history(history, input);
                 }
             }
             if (args[0] == "clear" || args[0] == "cls") {
@@ -335,10 +342,17 @@ int main(const int argc, const char **argv) {
                 if (args.size() == 3) {
                     Pack::ok("Syncing directory " + args[1] + " to " + args[2]);
                     sync(args);
-                }
-                if (args.size() == 2) {
-                    Pack::ok("Syncing directory " + args[1] + " to " + host);
-                    sync(args);
+                } else if (args.size() == 2) {
+                    if (host.empty()) {
+                        Pack::ko("sync: host not set. Use 'set host <host>' first.");
+                    } else {
+                        Pack::ok("Syncing directory " + args[1] + " to " + host);
+                        vector<string> sync_args = args;
+                        sync_args.push_back(host);
+                        sync(sync_args);
+                    }
+                } else {
+                    Pack::ko("sync: require <directory> [host]");
                 }
                 save_history(history, input);
             }
