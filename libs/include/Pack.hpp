@@ -137,7 +137,7 @@ namespace K {
          * @param timeout Reception timeout in seconds
          * @return Status code
          */
-        static int receive_file(uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
+        [[noreturn]] static void receive_file(uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
          * @brief Verifies file transfer integrity

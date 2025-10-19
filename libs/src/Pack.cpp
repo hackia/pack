@@ -265,11 +265,11 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
     return result;
 }
 
-int Pack::receive_file(uint16_t port, unsigned int timeout) {
+[[noreturn]] void Pack::receive_file(uint16_t port, unsigned int timeout) {
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         ko("Socket creation error");
-        return NETWORK_ERROR;
+        exit(NETWORK_ERROR);
     }
 
     int opt = 1;
@@ -283,13 +283,13 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
     if (bind(server_fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0) {
         ko("Bind failed");
         close(server_fd);
-        return NETWORK_ERROR;
+        exit(NETWORK_ERROR);
     }
 
     if (listen(server_fd, 10) < 0) {
         ko("Listen failed");
         close(server_fd);
-        return NETWORK_ERROR;
+        exit(NETWORK_ERROR);
     }
 
     ok("Server listening continuously on port " + std::to_string(port));
@@ -312,10 +312,8 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
 
         // Detect DELETE command using peek
         char peek_buf[8] = {0};
-        ssize_t peeked = recv(client_sock, peek_buf, sizeof(peek_buf), MSG_PEEK);
-        if (peeked > 0) {
-            std::string_view sv(peek_buf, static_cast<size_t>(peeked));
-            if (sv.rfind("DELETE ", 0) == 0) {
+        if (ssize_t peeked = recv(client_sock, peek_buf, sizeof(peek_buf), MSG_PEEK); peeked > 0) {
+            if (std::string_view sv(peek_buf, static_cast<size_t>(peeked)); sv.rfind("DELETE ", 0) == 0) {
                 // Consume the full line
                 std::string line;
                 char ch;
@@ -326,7 +324,6 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
                     if (ch == '\r') continue;
                     line += ch;
                 }
-                // line now starts with "DELETE ", extract path
                 std::string path;
                 if (line.rfind("DELETE ", 0) == 0) {
                     path = line.substr(7);
@@ -348,20 +345,24 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
                 }
                 send(client_sock, reply.c_str(), reply.size(), 0);
                 close(client_sock);
-                ok(std::string("Processed DELETE for ") + (sv.size() > 7 ? std::string(peek_buf + 7, peeked - 7) : std::string("")));
-                continue; // wait for next client
+                ok(std::string("Processed DELETE for ") + (sv.size() > 7
+                                                               ? std::string(peek_buf + 7, peeked - 7)
+                                                               : std::string("")));
+                continue;
             }
         }
 
         std::vector<unsigned char> sender_public_key(crypto_sign_ed25519_PUBLICKEYBYTES);
-        if (recv(client_sock, sender_public_key.data(), sender_public_key.size(), MSG_WAITALL) != static_cast<ssize_t>(sender_public_key.size())) {
+        if (recv(client_sock, sender_public_key.data(), sender_public_key.size(), MSG_WAITALL) != static_cast<ssize_t>(
+                sender_public_key.size())) {
             ko("Failed to receive public key");
             close(client_sock);
             continue;
         }
 
         std::vector<unsigned char> signature(crypto_sign_ed25519_BYTES);
-        if (recv(client_sock, signature.data(), signature.size(), MSG_WAITALL) != static_cast<ssize_t>(signature.size())) {
+        if (recv(client_sock, signature.data(), signature.size(), MSG_WAITALL) != static_cast<ssize_t>(signature.
+                size())) {
             ko("Failed to receive signature");
             close(client_sock);
             continue;
@@ -424,9 +425,8 @@ int Pack::receive_file(uint16_t port, unsigned int timeout) {
         }
         ok("Waiting for new connection...");
     }
-
     close(server_fd);
-    return OK;
+    exit(OK);
 }
 
 bool Pack::verify_transfer(const std::vector<uint8_t> &original_hash, const std::string &received_file) {

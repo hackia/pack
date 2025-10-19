@@ -166,6 +166,7 @@ void print_help(const char *program) {
             << "  " << program << " decode <input.hex> <output>         # Decode hex file to binary\n"
             << "  " << program << " verify <input> <output.hex>         # Verify encode/decode integrity\n"
             << "  " << program << " send <file> <destination>           # Send file to destination\n"
+            << "  " << program << " send-pubkey <destination>           # Send your public key file securely to destination\n"
             << "  " << program << " recv <port>                         # Receive file on port (default: 8080)\n"
             << "  " << program <<
             " keygen                              # Generate a new key pair (id_ed25519, id_ed25519.pub)\n"
@@ -254,6 +255,7 @@ int main(const int argc, const char **argv) {
                 cout << "history clear                    # Clear command history\n";
                 cout << "history <number>                 # Show history\n";
                 cout << "recv <port>                      # Receive file on port (default: 8080)\n";
+                cout << "send-pubkey <destination>        # Send your public key file securely to destination\n";
                 cout << "list                             # List available files\n";
                 cout << "delete <file> <host> <port>      # Delete file from host\n";
                 cout << "set port <port>                  # Set port for server\n";
@@ -539,6 +541,41 @@ int main(const int argc, const char **argv) {
 
             Pack::ok("Sending " + file_path + " to " + host + ":" + std::to_string(port));
             return Pack::send_file(file_path, host, port, public_key, private_key, Pack::DEFAULT_TIMEOUT);
+        }
+        if (cmd == "send-pubkey") {
+            if (argc != 3) {
+                Pack::ko("send-pubkey: require <destination:port>");
+                return Pack::INPUT_NOT_FOUND;
+            }
+            std::string home_dir = getenv("HOME");
+            std::string public_key_file = home_dir + "/.pack/id_ed25519.pub";
+            std::string public_key_path = public_key_file; // file to send
+            std::string private_key_path = home_dir + "/.pack/id_ed25519";
+
+            KeyManager km;
+            if (!km.loadKeys(public_key_path, private_key_path)) {
+                Pack::ko("Could not load keys from ~/.pack/. Please run 'pack keygen' first.");
+                return Pack::SYS_ERROR;
+            }
+            const auto &public_key = km.getPublicKey();
+            const auto &private_key = km.getPrivateKey();
+
+            std::string destination = argv[2];
+            size_t colon_pos = destination.find(':');
+            if (colon_pos == std::string::npos) {
+                Pack::ko("Invalid destination format. Use <host>:<port>");
+                return Pack::USAGE_ERROR;
+            }
+            std::string host = destination.substr(0, colon_pos);
+            uint16_t port = 0;
+            try {
+                port = std::stoi(destination.substr(colon_pos + 1));
+            } catch (const std::exception &e) {
+                Pack::ko(e.what());
+                return Pack::USAGE_ERROR;
+            }
+            Pack::ok("Sending public key file to " + host + ":" + std::to_string(port));
+            return Pack::send_file(public_key_file, host, port, public_key, private_key, Pack::DEFAULT_TIMEOUT);
         }
         if (cmd == "recv") {
             try {
