@@ -10,10 +10,10 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
-.idea/
-.cmake/
-bin/
-lib/
+.idea
+.cmake
+bin
+lib
 *.a
 pack_test
 *.bin
@@ -23,4 +23,5 @@ pack_test
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #cmake-build-*
-build/
+build
+.git

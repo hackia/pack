@@ -11,6 +11,7 @@
 #include <netdb.h>
 #include <fstream>
 #include <sodium.h>
+#include <sys/ioctl.h>
 using namespace K;
 
 void Pack::encode_hex_file(const std::string &in, const std::string &out_hex) {
@@ -74,7 +75,16 @@ uint8_t Pack::from_hex_nibble(const char c) {
 }
 
 void Pack::ko(const std::string &message) {
-    std::cerr << "\033[1;31m! \033[1;37m" << message << "\033[0m" << std::endl;
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    const size_t width = w.ws_col;
+    const size_t len = message.length();
+    const size_t padding = width - len - 10;
+    std::cout << "\033[1;31m ! \033[1;37m" << message << "\033[0m";
+    for (size_t i = 0; i < padding; ++i) {
+        std::cout << " ";
+    }
+    std::cout << "\033[1;34m[\033[1;31m ko \033[1;34m]\033[0m" << std::endl;
 }
 
 void Pack::decode_hex_file(const std::string &in_hex, const std::string &out_bin) {
@@ -109,7 +119,16 @@ void Pack::decode_hex_file(const std::string &in_hex, const std::string &out_bin
 
 
 void Pack::ok(const std::string &message) {
-    std::cout << "\033[1;32m* \033[1;37m" << message << "\033[0m" << std::endl;
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    const size_t width = w.ws_col;
+    const size_t len = message.length();
+    const size_t padding = width - len - 10;
+    std::cout << "\033[1;32m * \033[1;37m" << message << "\033[0m";
+    for (size_t i = 0; i < padding; ++i) {
+        std::cout << " ";
+    }
+    std::cout << "\033[1;34m[\033[1;32m ok \033[1;34m]\033[0m" << std::endl;
 }
 
 std::vector<uint8_t> Pack::hash(const std::string &file) {
@@ -405,7 +424,8 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
         }
 
         std::string target_path;
-        bool has_dir = (original_filename.find('/') != std::string::npos) || (original_filename.find('\\') != std::string::npos);
+        bool has_dir = (original_filename.find('/') != std::string::npos) || (
+                           original_filename.find('\\') != std::string::npos);
         if (has_dir) {
             std::filesystem::path rp(original_filename);
             if (rp.is_absolute()) {
@@ -528,9 +548,9 @@ bool Pack::write_chunk(const std::string &file_path, const std::vector<uint8_t> 
 
 
 int K::Pack::send_file(const std::string &file_path, const std::string &remote_name,
-                    const std::string &host, uint16_t port,
-                    const std::vector<unsigned char> &publicKey, const std::vector<unsigned char> &privateKey,
-                    unsigned int timeout) {
+                       const std::string &host, uint16_t port,
+                       const std::vector<unsigned char> &publicKey, const std::vector<unsigned char> &privateKey,
+                       unsigned int timeout) {
     if (!std::filesystem::exists(file_path)) {
         ko("Input file not found: " + file_path);
         return INPUT_NOT_FOUND;

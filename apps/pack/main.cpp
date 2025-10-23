@@ -47,7 +47,6 @@ namespace {
             return Pack::SYS_ERROR;
         }
 
-        Pack::ok("Syncing directory " + directory + " to " + host);
         int result = Pack::OK;
 
         // Iterate through directory
@@ -166,7 +165,8 @@ void print_help(const char *program) {
             << "  " << program << " decode <input.hex> <output>         # Decode hex file to binary\n"
             << "  " << program << " verify <input> <output.hex>         # Verify encode/decode integrity\n"
             << "  " << program << " send <file> <destination>           # Send file to destination\n"
-            << "  " << program << " send-pubkey <destination>           # Send your public key file securely to destination\n"
+            << "  " << program <<
+            " send-pubkey <destination>           # Send your public key file securely to destination\n"
             << "  " << program << " recv <port>                         # Receive file on port (default: 8080)\n"
             << "  " << program <<
             " keygen                              # Generate a new key pair (id_ed25519, id_ed25519.pub)\n"
@@ -261,8 +261,7 @@ int main(const int argc, const char **argv) {
                 cout << "set port <port>                  # Set port for server\n";
                 cout << "set host <host>                  # Set host for server\n";
                 cout << "set key <key>                    # Set key for server\n";
-                cout <<
-                        "keygen                           # Generate a new key pair (id_ed25519, id_ed25519.pub)\n";
+                cout << "keygen                           # Generate a new key pair (id_ed25519, id_ed25519.pub)\n";
                 cout << "encode <input> <output.hex>      # Encode binary file to hex\n";
                 cout << "decode <input.hex> <output>      # Decode hex file to binary\n";
                 cout << "verify <input> <output.hex>      # Verify encode/decode integrity\n";
@@ -342,7 +341,6 @@ int main(const int argc, const char **argv) {
             }
             if (args[0] == "sync") {
                 if (args.size() == 3) {
-                    Pack::ok("Syncing directory " + args[1] + " to " + args[2]);
                     sync(args);
                 } else if (args.size() == 2) {
                     if (host.empty()) {
@@ -485,7 +483,7 @@ int main(const int argc, const char **argv) {
                 Pack::ok(hx_in + " == " + hx_dec);
                 return Pack::OK;
             }
-            Pack::ko("Hash(input)  != Hash(decoded)");
+            Pack::ko("Hash(input) != Hash(decoded)");
             return Pack::MISMATCH;
         }
 
@@ -549,7 +547,7 @@ int main(const int argc, const char **argv) {
             }
             std::string home_dir = getenv("HOME");
             std::string public_key_file = home_dir + "/.pack/id_ed25519.pub";
-            std::string public_key_path = public_key_file; // file to send
+            const std::string &public_key_path = public_key_file; // file to send
             std::string private_key_path = home_dir + "/.pack/id_ed25519";
 
             KeyManager km;
@@ -587,7 +585,6 @@ int main(const int argc, const char **argv) {
                 std::string output_filename = ss.str();
                 Pack::ok(output_filename);
                 Pack::receive_file(port, Pack::DEFAULT_TIMEOUT);
-                return Pack::OK;
             } catch (const std::invalid_argument &e) {
                 Pack::ko(e.what());
                 return Pack::USAGE_ERROR;
@@ -643,14 +640,14 @@ int main(const int argc, const char **argv) {
             // Iterate through directory
             for (const auto &entry: std::filesystem::recursive_directory_iterator(directory)) {
                 if (entry.is_regular_file()) {
-                    std::string relative_path = std::filesystem::relative(entry.path(), directory).string();
-                    Pack::ok("Uploading " + relative_path);
-
-                    result = Pack::send_file(entry.path().string(), relative_path, host, DEFAULT_SYNC_PORT,
+                    Pack::ok("Uploading " + entry.path().string());
+                    result = Pack::send_file(entry.path().filename(), entry.path().filename().string(), host,
+                                             DEFAULT_SYNC_PORT,
                                              km.getPublicKey(), km.getPrivateKey(),
-                                             Pack::DEFAULT_TIMEOUT);
+                                             Pack::DEFAULT_TIMEOUT
+                    );
                     if (result != Pack::OK) {
-                        Pack::ko("Failed to upload " + relative_path);
+                        Pack::ko("Failed to upload " + entry.path().string());
                         return result;
                     }
                 }
