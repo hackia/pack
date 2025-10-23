@@ -118,7 +118,8 @@ namespace {
             if (c == '\n' || c == '\r') {
                 std::cout << "\n";
                 break;
-            } else if (static_cast<unsigned char>(c) == 127 || c == '\b') {
+            }
+            if (static_cast<unsigned char>(c) == 127 || c == '\b') {
                 // backspace
                 if (!buf.empty()) {
                     buf.pop_back();
@@ -346,7 +347,6 @@ int main(const int argc, const char **argv) {
                     if (host.empty()) {
                         Pack::ko("sync: host not set. Use 'set host <host>' first.");
                     } else {
-                        Pack::ok("Syncing directory " + args[1] + " to " + host);
                         vector<string> sync_args = args;
                         sync_args.push_back(host);
                         sync(sync_args);

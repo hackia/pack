@@ -281,7 +281,6 @@ int Pack::send_directory(const std::string &file_path, const std::string &host, 
         }
         return false;
     };
-
     int result = OK;
     for (const auto &entry: std::filesystem::recursive_directory_iterator(file_path)) {
         if (entry.is_regular_file()) {
@@ -547,10 +546,10 @@ bool Pack::write_chunk(const std::string &file_path, const std::vector<uint8_t> 
 }
 
 
-int K::Pack::send_file(const std::string &file_path, const std::string &remote_name,
-                       const std::string &host, uint16_t port,
-                       const std::vector<unsigned char> &publicKey, const std::vector<unsigned char> &privateKey,
-                       unsigned int timeout) {
+int Pack::send_file(const std::string &file_path, const std::string &remote_name,
+                    const std::string &host, uint16_t port,
+                    const std::vector<unsigned char> &publicKey, const std::vector<unsigned char> &privateKey,
+                    unsigned int timeout) {
     if (!std::filesystem::exists(file_path)) {
         ko("Input file not found: " + file_path);
         return INPUT_NOT_FOUND;
