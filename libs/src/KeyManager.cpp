@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <sodium.h>
 using namespace std;
+using namespace k;
 KeyManager::KeyManager() {
     if (sodium_init() < 0) {
         throw std::runtime_error("Failed to initialize libsodium");
@@ -66,7 +67,7 @@ bool KeyManager::readFile(const std::string &path, std::vector<unsigned char> &d
     }
     const std::streamsize size = ifs.tellg();
     ifs.seekg(0, std::ios::beg);
-    data.resize(size);
+    data.resize(static_cast<size_t>(size));
     ifs.read(reinterpret_cast<char *>(data.data()), size);
     return ifs.good();
 }

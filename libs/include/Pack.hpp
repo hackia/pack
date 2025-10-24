@@ -10,7 +10,7 @@ extern "C" {
 
 using namespace std;
 
-namespace K {
+namespace k {
     /** Hexadecimal character map for encoding */
     static constexpr char HEXMAP[] = "0123456789abcdef";
 
@@ -41,7 +41,7 @@ namespace K {
          * @param in Input binary file path
          * @param out_hex Output hexadecimal file path
          */
-        static void encode_hex_file(const std::string &in, const std::string &out_hex);
+        static void encode_hex_file(const string &in, const string &out_hex);
 
         /**
          * @brief Converts binary data to hexadecimal string
@@ -49,21 +49,21 @@ namespace K {
          * @param len Length of data in bytes
          * @return Hexadecimal string representation
          */
-        static std::string to_hex(const uint8_t *data, size_t len);
+        static string to_hex(const uint8_t *data, size_t len);
 
         /**
          * @brief Checks if a file exists
          * @param file Path to file
          * @return true if a file exists, false otherwise
          */
-        static bool exists(const std::string &file);
+        static bool exists(const string &file);
 
         /**
          * @brief Copies a file from source to destination
          * @param dest Destination path
          * @param source Source path
          */
-        static void copy(const std::string &dest, const std::string &source);
+        static void copy(const string &dest, const string &source);
 
         /**
          * @brief Converts a hex character to its 4-bit value
@@ -75,28 +75,29 @@ namespace K {
         /**
          * @brief Prints error message
          * @param message Error message to display
+         * @param e the error status code
          */
-        static void ko(const std::string &message);
+        static int ko(const string &message,const int e);
 
         /**
          * @brief Decodes a hexadecimal file to binary
          * @param in_hex Input hex file path
          * @param out_bin Output binary file path
          */
-        static void decode_hex_file(const std::string &in_hex, const std::string &out_bin);
+        static void decode_hex_file(const string &in_hex, const string &out_bin);
 
         /**
          * @brief Prints success message
          * @param message Success message to display
          */
-        static void ok(const std::string &message);
+        static void ok(const string &message);
 
         /**
          * @brief Computes BLAKE3 hash of a file
          * @param file Path to file
          * @return Vector containing a hash value
          */
-        static std::vector<uint8_t> hash(const std::string &file);
+        static vector<uint8_t> hash(const string &file);
 
         /**
          * Sends a file to a remote host over a specified network connection.
@@ -110,19 +111,19 @@ namespace K {
          * @return An integer status code indicating the result of the operation.
          *         Possible values are INPUT_NOT_FOUND, NETWORK_ERROR, or OK on success.
          */
-        static int send_file(const std::string &file_path, const std::string &host,
-                             uint16_t port, const std::vector<unsigned char> &publicKey,
-                             const std::vector<unsigned char> &privateKey,
+        static int send_file(const string &file_path, const string &host,
+                             uint16_t port, const vector<unsigned char> &publicKey,
+                             const vector<unsigned char> &privateKey,
                              unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
          * Sends a file to a remote host but uses the provided remote_name as the path/name on the server.
          * Useful for syncing directory structures where relative paths must be preserved.
          */
-        static int send_file(const std::string &file_path, const std::string &remote_name,
-                             const std::string &host, uint16_t port,
-                             const std::vector<unsigned char> &publicKey,
-                             const std::vector<unsigned char> &privateKey,
+        static int send_file(const string &file_path, const string &remote_name,
+                             const string &host, uint16_t port,
+                             const vector<unsigned char> &publicKey,
+                             const vector<unsigned char> &privateKey,
                              unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
@@ -136,9 +137,9 @@ namespace K {
          * @param timeout The timeout period for the connection in milliseconds.
          * @return The status code of the operation. Returns `OK` on success or an error code on failure.
          */
-        static int send_directory(const std::string &file_path, const std::string &host, uint16_t port,
-                                  const std::vector<unsigned char> &publicKey,
-                                  const std::vector<unsigned char> &privateKey,
+        static int send_directory(const string &file_path, const string &host, uint16_t port,
+                                  const vector<unsigned char> &publicKey,
+                                  const vector<unsigned char> &privateKey,
                                   unsigned int timeout);
 
         /**
@@ -155,8 +156,8 @@ namespace K {
          * @param received_file Path to a received file
          * @return true if verification successful, false otherwise
          */
-        static bool verify_transfer(const std::vector<uint8_t> &original_hash,
-                                    const std::string &received_file);
+        static bool verify_transfer(const vector<uint8_t> &original_hash,
+                                    const string &received_file);
 
         /**
          * Deletes a file on a remote server using a network connection.
@@ -179,7 +180,7 @@ namespace K {
          * @param chunk_size Size of chunk to prepare
          * @return Vector containing chunk data
          */
-        static std::vector<uint8_t> prepare_file_chunk(const std::string &file_path,
+        static vector<uint8_t> prepare_file_chunk(const string &file_path,
                                                        size_t offset, size_t chunk_size);
 
         /**
@@ -189,19 +190,19 @@ namespace K {
          * @param offset Offset in the file to write at
          * @return true if write successful, false otherwise
          */
-        static bool write_chunk(const std::string &file_path, const std::vector<uint8_t> &chunk,
-                                size_t offset);
+        static bool write_chunk(const string &file_path, const vector<uint8_t> &chunk,
+                                const size_t offset);
 
     private:
-        static std::string input; ///< Input file path
-        static std::string output; ///< Output file path
+        static string input; ///< Input file path
+        static string output; ///< Output file path
 
         /**
          * @brief Structure for network transfer metadata
          */
         struct TransferMetadata {
             size_t file_size; ///< Size of a file being transferred
-            std::vector<uint8_t> file_hash; ///< Hash of a file for verification
+            vector<uint8_t> file_hash; ///< Hash of a file for verification
             uint32_t chunk_count; ///< Number of chunks in transfer
             uint16_t protocol_version; ///< Protocol version number
         };
