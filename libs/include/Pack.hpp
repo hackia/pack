@@ -116,6 +116,16 @@ namespace K {
                              unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
+         * Sends a file to a remote host but uses the provided remote_name as the path/name on the server.
+         * Useful for syncing directory structures where relative paths must be preserved.
+         */
+        static int send_file(const std::string &file_path, const std::string &remote_name,
+                             const std::string &host, uint16_t port,
+                             const std::vector<unsigned char> &publicKey,
+                             const std::vector<unsigned char> &privateKey,
+                             unsigned int timeout = DEFAULT_TIMEOUT);
+
+        /**
          * Sends the contents of a specified directory to a remote host over a given port.
          *
          * @param file_path The path to the directory to be sent. Must point to a valid directory.
@@ -137,7 +147,7 @@ namespace K {
          * @param timeout Reception timeout in seconds
          * @return Status code
          */
-        static int receive_file(uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
+        [[noreturn]] static void receive_file(uint16_t port, unsigned int timeout = DEFAULT_TIMEOUT);
 
         /**
          * @brief Verifies file transfer integrity
