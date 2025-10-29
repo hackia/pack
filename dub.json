@@ -1,0 +1,9 @@
+{
+	"authors": [
+		"hackia"
+	],
+	"copyright": "Copyright © 2025, hackia",
+	"description": "A minimal D application.",
+	"license": "AGPL-3.0-or-later",
+	"name": "pack"
+}
